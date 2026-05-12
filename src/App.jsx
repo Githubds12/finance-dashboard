@@ -243,7 +243,7 @@ function App() {
                   {merchantStats.frequent.map((m, i) => (
                     <div key={m.name} className="flex justify-between items-center p-4 mb-2" style={{background: 'rgba(255,255,255,0.02)', borderRadius: '12px'}}>
                       <div className="flex items-center gap-4">
-                        <div style={{width: '32px', height: '32px', background: 'var(--accent-primary)', color: 'black', borderRadius: '8px', display: 'flex', alignItems: 'center', justify-content: 'center', fontWeight: '800'}}>{i+1}</div>
+                        <div style={{width: '32px', height: '32px', background: 'var(--accent-primary)', color: 'black', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800'}}>{i+1}</div>
                         <div>
                           <div style={{fontWeight: '700'}}>{m.name}</div>
                           <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>{m.count} payments</div>
@@ -260,7 +260,7 @@ function App() {
                   {merchantStats.spending.map((m, i) => (
                     <div key={m.name} className="flex justify-between items-center p-4 mb-2" style={{background: 'rgba(255,255,255,0.02)', borderRadius: '12px'}}>
                       <div className="flex items-center gap-4">
-                        <div style={{width: '32px', height: '32px', background: 'var(--accent-secondary)', color: 'black', borderRadius: '8px', display: 'flex', alignItems: 'center', justify-content: 'center', fontWeight: '800'}}>{i+1}</div>
+                        <div style={{width: '32px', height: '32px', background: 'var(--accent-secondary)', color: 'black', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800'}}>{i+1}</div>
                         <div>
                           <div style={{fontWeight: '700'}}>{m.name}</div>
                           <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>{formatCurrency(m.amount)} total</div>
@@ -313,7 +313,7 @@ function App() {
         )}
 
         {editingId && (
-          <div className="modal-overlay" style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justify-content: 'center', z-index: 1000}}>
+          <div className="modal-overlay" style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000}}>
             <div className="glass-panel" style={{width: '400px'}}>
               <h2 className="mb-4">Edit Entry</h2>
               <input type="text" value={editValue} onChange={(e)=>setEditValue(e.target.value)} placeholder="Rename" style={{width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '8px', color: 'white', marginBottom: '12px'}} />
