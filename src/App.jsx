@@ -10,7 +10,10 @@ import {
   X,
   FileText,
   Search,
-  Calendar
+  Calendar,
+  CloudDownload,
+  Copy,
+  Check
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -31,13 +34,15 @@ function App() {
   const [editNote, setEditNote] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [visibleCount, setVisibleCount] = useState(50);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const savedOverrides = JSON.parse(localStorage.getItem('txn_overrides') || '{}');
     const merged = rawData.transactions.map(t => ({
       ...t,
-      nickname: savedOverrides[t.id]?.nickname || '',
-      notes: savedOverrides[t.id]?.notes || ''
+      nickname: savedOverrides[t.id]?.nickname || t.nickname || '',
+      notes: savedOverrides[t.id]?.notes || t.notes || ''
     }));
     setTransactions(merged);
   }, []);
@@ -45,22 +50,14 @@ function App() {
   const stats = useMemo(() => {
     let totalIn = 0;
     let totalOut = 0;
-    
     transactions.forEach(t => {
       if (t.type === 'CREDIT') totalIn += t.amount;
       else if (t.type === 'DEBIT') totalOut += t.amount;
     });
-
     const currentBalance = transactions[transactions.length - 1]?.balance || 0;
-
-    // Sample data for chart (every 10th txn to keep it smooth)
     const sampledChartData = transactions
       .filter((_, i) => i % Math.max(1, Math.floor(transactions.length / 100)) === 0)
-      .map(t => ({
-        name: t.date,
-        balance: t.balance
-      }));
-
+      .map(t => ({ name: t.date, balance: t.balance }));
     return { totalIn, totalOut, currentBalance, chartData: sampledChartData };
   }, [transactions]);
 
@@ -84,11 +81,19 @@ function App() {
     setEditingId(null);
   };
 
+  const getSyncData = () => {
+    const overrides = JSON.parse(localStorage.getItem('txn_overrides') || '{}');
+    return JSON.stringify(overrides, null, 2);
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(getSyncData());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const formatCurrency = (val) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR'
-    }).format(val);
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(val);
   };
 
   return (
@@ -103,14 +108,42 @@ function App() {
             A/c: {rawData.metadata.account_no} • {rawData.metadata.account_type} • {rawData.metadata.merged_count} Records
           </div>
         </div>
-        <div className="glass" style={{padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '12px'}}>
-          <Calendar color="var(--accent-color)" />
-          <div>
-            <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>Statement Range</div>
-            <div style={{fontWeight: '600'}}>{transactions[0]?.date} - {transactions[transactions.length-1]?.date}</div>
+        <div style={{display: 'flex', gap: '12px'}}>
+          <button className="btn-secondary" onClick={() => setShowSyncModal(true)}>
+            <CloudDownload size={18} />
+            Sync with AI
+          </button>
+          <div className="glass header-stat">
+            <Calendar color="var(--accent-color)" size={18} />
+            <div>
+              <div className="stat-tiny-label">Range</div>
+              <div className="stat-tiny-val">{transactions[0]?.date.split(' ').slice(1).join(' ')} - {transactions[transactions.length-1]?.date.split(' ').slice(1).join(' ')}</div>
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Sync Modal */}
+      {showSyncModal && (
+        <div className="modal-overlay">
+          <div className="glass modal-content">
+            <div className="flex justify-between items-center mb-4">
+              <h2 style={{fontSize: '1.2rem'}}>Sync your Notes & Renames</h2>
+              <button onClick={() => setShowSyncModal(false)} className="btn-icon"><X size={20}/></button>
+            </div>
+            <p style={{fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '16px'}}>
+              Copy this data and share it with Antigravity (AI) to permanently save your changes to the GitHub repository.
+            </p>
+            <div className="sync-data-box">
+              <pre>{getSyncData()}</pre>
+              <button className="copy-btn" onClick={copyToClipboard}>
+                {copied ? <Check size={16} color="var(--success)"/> : <Copy size={16}/>}
+                {copied ? 'Copied!' : 'Copy Data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid">
         <div className="glass glass-card">
@@ -139,7 +172,7 @@ function App() {
       <div className="glass glass-card mb-4">
         <div className="flex items-center gap-2" style={{marginBottom: '16px'}}>
           <Activity size={20} color="var(--accent-color)" />
-          <h2 style={{fontSize: '1.2rem'}}>Historical Balance Trend</h2>
+          <h2 style={{fontSize: '1.2rem'}}>Balance History</h2>
         </div>
         <div className="chart-container">
           <ResponsiveContainer width="100%" height="100%">
@@ -177,7 +210,7 @@ function App() {
             <Search size={16} color="var(--text-secondary)" />
             <input 
               type="text" 
-              placeholder="Search payments, UPI, or notes..." 
+              placeholder="Search payments..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -189,7 +222,7 @@ function App() {
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Payment Detail / Notes</th>
+                <th>Detail / Notes</th>
                 <th>Type</th>
                 <th style={{textAlign: 'right'}}>Amount</th>
                 <th style={{textAlign: 'right'}}>Action</th>
@@ -204,24 +237,24 @@ function App() {
                   <td style={{minWidth: '400px'}}>
                     {editingId === txn.id ? (
                       <div className="edit-container">
-                        <input type="text" placeholder="Nickname" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="edit-input" autoFocus />
-                        <textarea placeholder="Notes" value={editNote} onChange={(e) => setEditNote(e.target.value)} className="edit-textarea" />
+                        <input type="text" placeholder="Rename UPI" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="edit-input" autoFocus />
+                        <textarea placeholder="Add a note..." value={editNote} onChange={(e) => setEditNote(e.target.value)} className="edit-textarea" />
                         <div style={{display: 'flex', gap: '8px'}}>
-                          <button onClick={() => handleSaveEdit(txn.id)} className="btn-save" style={{padding: '4px 12px', borderRadius: '4px', border: 'none', cursor: 'pointer'}}>Save</button>
-                          <button onClick={() => setEditingId(null)} className="btn-cancel" style={{padding: '4px 12px', borderRadius: '4px', border: 'none', cursor: 'pointer'}}>Cancel</button>
+                          <button onClick={() => handleSaveEdit(txn.id)} className="btn-save">Save</button>
+                          <button onClick={() => setEditingId(null)} className="btn-cancel">Cancel</button>
                         </div>
                       </div>
                     ) : (
                       <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                         <div style={{fontWeight: '600', color: txn.nickname ? 'var(--accent-color)' : 'inherit'}}>
-                          {txn.nickname || 'Unlabeled'}
+                          {txn.nickname || 'Unlabeled Payment'}
                         </div>
                         <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)', opacity: 0.7}}>
                           {txn.description}
                         </div>
                         {txn.notes && (
-                          <div style={{marginTop: '8px', padding: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', fontSize: '0.9rem', borderLeft: '3px solid var(--accent-color)'}}>
-                            <FileText size={12} style={{marginRight: '4px', display: 'inline'}} />
+                          <div className="note-display">
+                            <FileText size={12} style={{marginRight: '4px'}} />
                             {txn.notes}
                           </div>
                         )}
@@ -245,10 +278,7 @@ function App() {
           </table>
           {visibleCount < filteredTransactions.length && (
             <div style={{textAlign: 'center', padding: '24px'}}>
-              <button 
-                onClick={() => setVisibleCount(visibleCount + 100)}
-                style={{background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid var(--border-color)', padding: '12px 24px', borderRadius: '8px', cursor: 'pointer'}}
-              >
+              <button onClick={() => setVisibleCount(visibleCount + 100)} className="btn-load-more">
                 Load More Records ({filteredTransactions.length - visibleCount} remaining)
               </button>
             </div>
@@ -257,31 +287,34 @@ function App() {
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
-        .search-box {
+        .header-stat { padding: 8px 16px; display: flex; align-items: center; gap: 12px; }
+        .stat-tiny-label { font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; }
+        .stat-tiny-val { font-size: 0.8rem; font-weight: 600; }
+        .btn-secondary {
           background: rgba(255,255,255,0.05);
           border: 1px solid var(--border-color);
-          border-radius: 8px;
+          color: white;
           padding: 8px 16px;
+          border-radius: 8px;
           display: flex;
           align-items: center;
-          gap: 12px;
-          flex: 1;
-          max-width: 400px;
+          gap: 8px;
+          cursor: pointer;
+          transition: all 0.2s;
         }
-        .search-box input {
-          background: none;
-          border: none;
-          color: white;
-          outline: none;
-          width: 100%;
-        }
-        .edit-container { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
-        .edit-input { background: rgba(255,255,255,0.1); border: 1px solid var(--accent-color); color: white; padding: 8px 12px; border-radius: 6px; outline: none; }
-        .edit-textarea { background: rgba(255,255,255,0.1); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 12px; border-radius: 6px; outline: none; min-height: 60px; }
-        .btn-icon { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px; border-radius: 50%; transition: all 0.2s; }
-        .btn-icon:hover { background: rgba(255,255,255,0.1); color: var(--accent-color); }
-        .btn-save { background: var(--success) !important; color: white !important; }
-        .btn-cancel { background: rgba(255,255,255,0.1) !important; color: white !important; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.1); border-color: var(--accent-color); }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+        .modal-content { width: 90%; max-width: 600px; padding: 32px; position: relative; border: 1px solid var(--accent-color); }
+        .sync-data-box { background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid var(--border-color); position: relative; }
+        .sync-data-box pre { padding: 20px; color: var(--accent-color); font-size: 0.8rem; max-height: 300px; overflow-y: auto; margin: 0; }
+        .copy-btn { position: absolute; top: 12px; right: 12px; background: var(--accent-color); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; }
+        .search-box { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 16px; display: flex; align-items: center; gap: 12px; flex: 1; max-width: 400px; }
+        .search-box input { background: none; border: none; color: white; outline: none; width: 100%; }
+        .note-display { margin-top: 8px; padding: 8px; background: rgba(255,255,255,0.05); borderRadius: 4px; fontSize: 0.9rem; border-left: 3px solid var(--accent-color); display: flex; align-items: center; }
+        .btn-load-more { background: rgba(255,255,255,0.1); color: white; border: 1px solid var(--border-color); padding: 12px 24px; border-radius: 8px; cursor: pointer; width: 100%; transition: all 0.2s; }
+        .btn-load-more:hover { background: rgba(255,255,255,0.15); border-color: var(--accent-color); }
+        .btn-save { background: var(--success) !important; color: white !important; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+        .btn-cancel { background: rgba(255,255,255,0.1) !important; color: white !important; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
       `}} />
     </div>
   );
