@@ -64,7 +64,7 @@ function App() {
   }, []);
 
   const stats = useMemo(() => {
-    let totalIn = 0; totalOut = 0;
+    let totalIn = 0; let totalOut = 0;
     transactions.forEach(t => {
       if (t.type === 'CREDIT') totalIn += t.amount;
       else if (t.type === 'DEBIT') totalOut += t.amount;
