@@ -212,7 +212,9 @@
       "description": "UPI/Dimpee Barman/447821317859/Sent UPI-411252706658 2,000.00 2,031.00 from",
       "type": "CREDIT",
       "amount": 2000.0,
-      "balance": 2031.0
+      "balance": 2031.0,
+      "nickname": "",
+      "notes": "Ciggerate Connect"
     },
     {
       "id": "c51f3b15deb7",
@@ -228,7 +230,9 @@
       "description": "UPI/ANKIT PAL/412669577510/na UPI-412654052736 110.00",
       "type": "DEBIT",
       "amount": 110.0,
-      "balance": 1911.0
+      "balance": 1911.0,
+      "nickname": "",
+      "notes": "Nan Kathai,etc"
     },
     {
       "id": "87560182c5b5",
@@ -252,7 +256,9 @@
       "description": "UPI/Om Telcome/412875396849/na UPI-412814568667 60.00",
       "type": "DEBIT",
       "amount": 60.0,
-      "balance": 1771.0
+      "balance": 1771.0,
+      "nickname": "",
+      "notes": "Nan Kathai"
     },
     {
       "id": "ecf41981d99a",
@@ -300,7 +306,9 @@
       "description": "NEFT BKIDY24138411502 DEEPANSHU SINGH NEFTINW-0857133546 1.00 155.47 SO MR",
       "type": "CREDIT",
       "amount": 1.0,
-      "balance": 155.47
+      "balance": 155.47,
+      "nickname": "",
+      "notes": "Connect Ciggerete"
     },
     {
       "id": "fd1e7e6f941a",
@@ -308,7 +316,9 @@
       "description": "UPI/Mr DHIRENDRA KU/413921175487/na UPI-413912008338 35.00",
       "type": "DEBIT",
       "amount": 35.0,
-      "balance": 120.47
+      "balance": 120.47,
+      "nickname": "",
+      "notes": "Patties"
     },
     {
       "id": "80d39d0e33c4",
@@ -316,7 +326,9 @@
       "description": "UPI/Ishwar Chand/414126016332/na UPI-414170164427 50.00",
       "type": "DEBIT",
       "amount": 50.0,
-      "balance": 70.47
+      "balance": 70.47,
+      "nickname": "",
+      "notes": "Gol gappa"
     },
     {
       "id": "ced46e6c811b",
@@ -2588,7 +2600,9 @@
       "description": "UPI/9412890157@payt/509610804358/UPI UPI-509623226929 1.00",
       "type": "DEBIT",
       "amount": 1.0,
-      "balance": 24908.45
+      "balance": 24908.45,
+      "nickname": "",
+      "notes": "papa"
     },
     {
       "id": "0e54a0d091d7",
@@ -2612,7 +2626,9 @@
       "description": "UPI/9412890157@ptax/509610805617/UPI UPI-509623264904 99,800.00",
       "type": "DEBIT",
       "amount": 99800.0,
-      "balance": -74891.55
+      "balance": -74891.55,
+      "nickname": "",
+      "notes": "Papa"
     },
     {
       "id": "cb07fd3ac878",
