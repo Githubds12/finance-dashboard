@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: finance-dashboard
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    repo: https://github.com/Githubds12/finance-dashboard
+    autoDeploy: true
