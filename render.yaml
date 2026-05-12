@@ -1,8 +1,12 @@
 services:
   - type: web
     name: finance-dashboard
-    env: static
+    runtime: node
+    plan: free
     buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    repo: https://github.com/Githubds12/finance-dashboard
-    autoDeploy: true
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: GITHUB_TOKEN
+        sync: false # User will set this in Render UI
