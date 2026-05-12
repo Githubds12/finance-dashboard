@@ -8,7 +8,9 @@ import {
   Edit2,
   Save,
   X,
-  FileText
+  FileText,
+  Search,
+  Calendar
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -27,8 +29,9 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [editNote, setEditNote] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [visibleCount, setVisibleCount] = useState(50);
 
-  // Load data and merge with localStorage
   useEffect(() => {
     const savedOverrides = JSON.parse(localStorage.getItem('txn_overrides') || '{}');
     const merged = rawData.transactions.map(t => ({
@@ -45,39 +48,39 @@ function App() {
     
     transactions.forEach(t => {
       if (t.type === 'CREDIT') totalIn += t.amount;
-      else totalOut += t.amount;
+      else if (t.type === 'DEBIT') totalOut += t.amount;
     });
 
     const currentBalance = transactions[transactions.length - 1]?.balance || 0;
 
-    const chartData = transactions.map(t => ({
-      name: t.date.substring(0, 6),
-      balance: t.balance
-    }));
+    // Sample data for chart (every 10th txn to keep it smooth)
+    const sampledChartData = transactions
+      .filter((_, i) => i % Math.max(1, Math.floor(transactions.length / 100)) === 0)
+      .map(t => ({
+        name: t.date,
+        balance: t.balance
+      }));
 
-    return { totalIn, totalOut, currentBalance, chartData };
+    return { totalIn, totalOut, currentBalance, chartData: sampledChartData };
   }, [transactions]);
 
-  const handleStartEdit = (txn) => {
-    setEditingId(txn.id);
-    setEditValue(txn.nickname || '');
-    setEditNote(txn.notes || '');
-  };
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(t => 
+      t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (t.nickname && t.nickname.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (t.notes && t.notes.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+  }, [transactions, searchTerm]);
 
   const handleSaveEdit = (id) => {
     const updated = transactions.map(t => {
-      if (t.id === id) {
-        return { ...t, nickname: editValue, notes: editNote };
-      }
+      if (t.id === id) return { ...t, nickname: editValue, notes: editNote };
       return t;
     });
     setTransactions(updated);
-    
-    // Persist to localStorage
     const savedOverrides = JSON.parse(localStorage.getItem('txn_overrides') || '{}');
     savedOverrides[id] = { nickname: editValue, notes: editNote };
     localStorage.setItem('txn_overrides', JSON.stringify(savedOverrides));
-    
     setEditingId(null);
   };
 
@@ -97,14 +100,14 @@ function App() {
             Welcome back, <span style={{color: 'white', fontWeight: 'bold'}}>{rawData.metadata.name}</span>
           </div>
           <div style={{color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '4px'}}>
-            A/c: {rawData.metadata.account_no} • {rawData.metadata.account_type}
+            A/c: {rawData.metadata.account_no} • {rawData.metadata.account_type} • {rawData.metadata.merged_count} Records
           </div>
         </div>
         <div className="glass" style={{padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '12px'}}>
-          <Activity color="var(--success)" />
+          <Calendar color="var(--accent-color)" />
           <div>
-            <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>System Status</div>
-            <div style={{fontWeight: '600', color: 'var(--success)'}}>Live & Syncing</div>
+            <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>Statement Range</div>
+            <div style={{fontWeight: '600'}}>{transactions[0]?.date} - {transactions[transactions.length-1]?.date}</div>
           </div>
         </div>
       </header>
@@ -117,19 +120,17 @@ function App() {
           </div>
           <div className="stat-value">{formatCurrency(stats.currentBalance)}</div>
         </div>
-        
         <div className="glass glass-card">
           <div className="stat-label">
             <ArrowDownCircle size={18} color="var(--success)" />
-            Total Income
+            All-Time Credits
           </div>
           <div className="stat-value text-success">+{formatCurrency(stats.totalIn)}</div>
         </div>
-
         <div className="glass glass-card">
           <div className="stat-label">
             <ArrowUpCircle size={18} color="var(--danger)" />
-            Total Expenses
+            All-Time Debits
           </div>
           <div className="stat-value text-danger">-{formatCurrency(stats.totalOut)}</div>
         </div>
@@ -138,7 +139,7 @@ function App() {
       <div className="glass glass-card mb-4">
         <div className="flex items-center gap-2" style={{marginBottom: '16px'}}>
           <Activity size={20} color="var(--accent-color)" />
-          <h2 style={{fontSize: '1.2rem'}}>Balance Trend</h2>
+          <h2 style={{fontSize: '1.2rem'}}>Historical Balance Trend</h2>
         </div>
         <div className="chart-container">
           <ResponsiveContainer width="100%" height="100%">
@@ -151,7 +152,7 @@ function App() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
               <XAxis dataKey="name" hide />
-              <YAxis hide domain={['dataMin - 100', 'dataMax + 100']} />
+              <YAxis hide />
               <Tooltip 
                 contentStyle={{ 
                   backgroundColor: 'var(--surface-color)', 
@@ -160,78 +161,66 @@ function App() {
                   backdropFilter: 'blur(8px)'
                 }}
               />
-              <Area 
-                type="monotone" 
-                dataKey="balance" 
-                stroke="var(--accent-color)" 
-                strokeWidth={3}
-                fillOpacity={1} 
-                fill="url(#colorBalance)" 
-              />
+              <Area type="monotone" dataKey="balance" stroke="var(--accent-color)" strokeWidth={2} fillOpacity={1} fill="url(#colorBalance)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
 
       <div className="glass glass-card">
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex items-center gap-2">
             <CreditCard size={20} color="var(--accent-color)" />
-            <h2 style={{fontSize: '1.2rem'}}>Transactions & Maintenance Records</h2>
+            <h2 style={{fontSize: '1.2rem'}}>Maintenance Records</h2>
+          </div>
+          <div className="search-box">
+            <Search size={16} color="var(--text-secondary)" />
+            <input 
+              type="text" 
+              placeholder="Search payments, UPI, or notes..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
         </div>
+
         <div style={{overflowX: 'auto'}}>
           <table>
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Payment / Note</th>
+                <th>Payment Detail / Notes</th>
                 <th>Type</th>
                 <th style={{textAlign: 'right'}}>Amount</th>
                 <th style={{textAlign: 'right'}}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {transactions.slice().reverse().map((txn) => (
+              {filteredTransactions.slice().reverse().slice(0, visibleCount).map((txn) => (
                 <tr key={txn.id}>
                   <td style={{color: 'var(--text-secondary)', verticalAlign: 'top', paddingTop: '20px'}}>
                     {txn.date}
                   </td>
-                  <td style={{minWidth: '300px'}}>
+                  <td style={{minWidth: '400px'}}>
                     {editingId === txn.id ? (
                       <div className="edit-container">
-                        <input 
-                          type="text" 
-                          placeholder="Rename UPI (e.g. Rent, Grocery)"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          className="edit-input"
-                          autoFocus
-                        />
-                        <textarea 
-                          placeholder="Add a detailed maintenance note..."
-                          value={editNote}
-                          onChange={(e) => setEditNote(e.target.value)}
-                          className="edit-textarea"
-                        />
+                        <input type="text" placeholder="Nickname" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="edit-input" autoFocus />
+                        <textarea placeholder="Notes" value={editNote} onChange={(e) => setEditNote(e.target.value)} className="edit-textarea" />
+                        <div style={{display: 'flex', gap: '8px'}}>
+                          <button onClick={() => handleSaveEdit(txn.id)} className="btn-save" style={{padding: '4px 12px', borderRadius: '4px', border: 'none', cursor: 'pointer'}}>Save</button>
+                          <button onClick={() => setEditingId(null)} className="btn-cancel" style={{padding: '4px 12px', borderRadius: '4px', border: 'none', cursor: 'pointer'}}>Cancel</button>
+                        </div>
                       </div>
                     ) : (
                       <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                         <div style={{fontWeight: '600', color: txn.nickname ? 'var(--accent-color)' : 'inherit'}}>
-                          {txn.nickname || 'Unlabeled Payment'}
+                          {txn.nickname || 'Unlabeled'}
                         </div>
                         <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)', opacity: 0.7}}>
                           {txn.description}
                         </div>
                         {txn.notes && (
-                          <div style={{
-                            marginTop: '8px', 
-                            padding: '8px', 
-                            background: 'rgba(255,255,255,0.05)', 
-                            borderRadius: '4px',
-                            fontSize: '0.9rem',
-                            borderLeft: '3px solid var(--accent-color)'
-                          }}>
+                          <div style={{marginTop: '8px', padding: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', fontSize: '0.9rem', borderLeft: '3px solid var(--accent-color)'}}>
                             <FileText size={12} style={{marginRight: '4px', display: 'inline'}} />
                             {txn.notes}
                           </div>
@@ -240,81 +229,59 @@ function App() {
                     )}
                   </td>
                   <td style={{verticalAlign: 'top', paddingTop: '20px'}}>
-                    <span className={`badge ${txn.type === 'CREDIT' ? 'badge-credit' : 'badge-debit'}`}>
-                      {txn.type}
-                    </span>
+                    <span className={`badge ${txn.type === 'CREDIT' ? 'badge-credit' : 'badge-debit'}`}>{txn.type}</span>
                   </td>
                   <td style={{textAlign: 'right', fontWeight: '500', verticalAlign: 'top', paddingTop: '20px'}} className={txn.type === 'CREDIT' ? 'text-success' : ''}>
                     {txn.type === 'CREDIT' ? '+' : '-'}{formatCurrency(txn.amount)}
                   </td>
                   <td style={{textAlign: 'right', verticalAlign: 'top', paddingTop: '16px'}}>
-                    {editingId === txn.id ? (
-                      <div style={{display: 'flex', gap: '8px', justifyContent: 'flex-end'}}>
-                        <button onClick={() => handleSaveEdit(txn.id)} className="btn-icon btn-save">
-                          <Save size={16} />
-                        </button>
-                        <button onClick={() => setEditingId(null)} className="btn-icon btn-cancel">
-                          <X size={16} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => handleStartEdit(txn)} className="btn-icon">
-                        <Edit2 size={16} />
-                      </button>
-                    )}
+                    <button onClick={() => { setEditingId(txn.id); setEditValue(txn.nickname || ''); setEditNote(txn.notes || ''); }} className="btn-icon">
+                      <Edit2 size={16} />
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {visibleCount < filteredTransactions.length && (
+            <div style={{textAlign: 'center', padding: '24px'}}>
+              <button 
+                onClick={() => setVisibleCount(visibleCount + 100)}
+                style={{background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid var(--border-color)', padding: '12px 24px', borderRadius: '8px', cursor: 'pointer'}}
+              >
+                Load More Records ({filteredTransactions.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
-        .edit-container {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          padding: 8px 0;
-        }
-        .edit-input {
-          background: rgba(255,255,255,0.1);
-          border: 1px solid var(--accent-color);
-          color: white;
-          padding: 8px 12px;
-          border-radius: 6px;
-          outline: none;
-          width: 100%;
-        }
-        .edit-textarea {
-          background: rgba(255,255,255,0.1);
+        .search-box {
+          background: rgba(255,255,255,0.05);
           border: 1px solid var(--border-color);
-          color: var(--text-secondary);
-          padding: 8px 12px;
-          border-radius: 6px;
-          outline: none;
-          width: 100%;
-          min-height: 60px;
-          resize: vertical;
-          font-size: 0.9rem;
+          border-radius: 8px;
+          padding: 8px 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex: 1;
+          max-width: 400px;
         }
-        .btn-icon {
+        .search-box input {
           background: none;
           border: none;
-          color: var(--text-secondary);
-          cursor: pointer;
-          padding: 8px;
-          border-radius: 50%;
-          transition: all 0.2s;
+          color: white;
+          outline: none;
+          width: 100%;
         }
-        .btn-icon:hover {
-          background: rgba(255,255,255,0.1);
-          color: var(--accent-color);
-        }
-        .btn-save { color: var(--success); }
-        .btn-save:hover { background: rgba(16, 185, 129, 0.1); color: var(--success); }
-        .btn-cancel { color: var(--danger); }
-        .btn-cancel:hover { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+        .edit-container { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+        .edit-input { background: rgba(255,255,255,0.1); border: 1px solid var(--accent-color); color: white; padding: 8px 12px; border-radius: 6px; outline: none; }
+        .edit-textarea { background: rgba(255,255,255,0.1); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 12px; border-radius: 6px; outline: none; min-height: 60px; }
+        .btn-icon { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px; border-radius: 50%; transition: all 0.2s; }
+        .btn-icon:hover { background: rgba(255,255,255,0.1); color: var(--accent-color); }
+        .btn-save { background: var(--success) !important; color: white !important; }
+        .btn-cancel { background: rgba(255,255,255,0.1) !important; color: white !important; }
       `}} />
     </div>
   );
