@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   Home, 
   Target, 
@@ -15,9 +15,10 @@ import {
   ArrowLeft,
   Loader2,
   TrendingUp,
-  Repeat,
-  History,
-  LayoutDashboard
+  MessageSquare,
+  Send,
+  Sparkles,
+  Bot
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -33,14 +34,19 @@ import './index.css';
 
 function App() {
   const [transactions, setTransactions] = useState([]);
-  const [activeTab, setActiveTab] = useState('home'); // home, insights, records
+  const [activeTab, setActiveTab] = useState('home'); // home, insights, records, chat
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [editNote, setEditNote] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
-  const [selectedMerchant, setSelectedMerchant] = useState(null);
+  
+  // Chat State
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState([]);
+  const [isTyping, setIsTyping] = useState(false);
+  const chatEndRef = useRef(null);
 
   useEffect(() => {
     const savedOverrides = JSON.parse(localStorage.getItem('txn_overrides') || '{}');
@@ -62,6 +68,10 @@ function App() {
     });
     setTransactions(merged);
   }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory]);
 
   const stats = useMemo(() => {
     let totalIn = 0; let totalOut = 0;
@@ -110,6 +120,28 @@ function App() {
     finally { setSyncing(false); setTimeout(() => setSyncStatus(null), 3000); }
   };
 
+  const handleSendMessage = async () => {
+    if (!chatInput.trim()) return;
+    const userMsg = { role: 'user', text: chatInput };
+    setChatHistory(prev => [...prev, userMsg]);
+    setChatInput('');
+    setIsTyping(true);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: chatInput, history: chatHistory })
+      });
+      const data = await response.json();
+      setChatHistory(prev => [...prev, { role: 'ai', text: data.text }]);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'ai', text: "Sorry, I'm having trouble connecting to my brain right now. Check your API key!" }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
   const formatCurrency = (val) => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
   };
@@ -127,35 +159,33 @@ function App() {
         <div className={`sidebar-item ${activeTab === 'records' ? 'active' : ''}`} onClick={() => setActiveTab('records')}>
           <GraduationCap size={24} />
         </div>
+        <div className={`sidebar-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+          <MessageSquare size={24} />
+        </div>
       </div>
 
       <div className="main-content">
         <div className="top-header">
           <div className="live-badge">
             <div className="live-dot"></div>
-            LIVE
+            LIVE ANALYST
           </div>
-          <h1 className="dashboard-title">Dashboard</h1>
-        </div>
-
-        {/* Hero Banner */}
-        <div className="hero-banner">
-          <div className="hero-overlay"></div>
-          <div className="hero-content">
-            <div className="hero-title">Maximize Wealth</div>
-            <div className="hero-subtitle">Smarter Tracking • Better Decisions • Global Access</div>
-          </div>
-        </div>
-
-        {/* Dynamic Quote Card */}
-        <div className="quote-card">
-          <div className="quote-text">"Financial freedom is available to those who learn about it and work for it."</div>
-          <div className="quote-author">— ROBERT KIYOSAKI</div>
+          <h1 className="dashboard-title">
+            {activeTab === 'chat' ? 'AI Analyst' : 'Dashboard'}
+          </h1>
         </div>
 
         {activeTab === 'home' && (
           <div className="view-fade-in">
-            {/* Main Metrics */}
+             {/* Hero Banner */}
+            <div className="hero-banner">
+              <div className="hero-overlay"></div>
+              <div className="hero-content">
+                <div className="hero-title">Maximize Wealth</div>
+                <div className="hero-subtitle">Smarter Tracking • Better Decisions • Global Access</div>
+              </div>
+            </div>
+
             <div className="metrics-grid">
               <div className="metric-card-xl" style={{background: 'linear-gradient(135deg, #6366f1, #a855f7)'}}>
                 <div className="metric-info">
@@ -180,55 +210,59 @@ function App() {
             <div className="glass-panel">
               <div className="flex justify-between items-center mb-6">
                 <h2>Spending Trends</h2>
-                <button 
-                  className={`btn-sync ${syncStatus === 'success' ? 'success' : ''}`} 
-                  onClick={handleCloudSync}
-                  style={{background: 'var(--accent-primary)', color: 'black', border: 'none', padding: '10px 20px', borderRadius: '12px', fontWeight: '800', cursor: 'pointer', display: 'flex', gap: '8px', alignItems: 'center'}}
-                >
+                <button className={`btn-sync ${syncStatus === 'success' ? 'success' : ''}`} onClick={handleCloudSync}>
                   {syncing ? <Loader2 className="animate-spin" size={18}/> : <CloudUpload size={18}/>}
-                  {syncing ? 'SYNCING...' : syncStatus === 'success' ? 'SYNCED!' : 'SYNC TO CLOUD'}
+                  {syncing ? 'SYNCING...' : 'SYNC TO CLOUD'}
                 </button>
               </div>
               <div style={{height: '300px', width: '100%'}}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={stats.chartData}>
-                    <defs>
-                      <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" vertical={false} />
-                    <XAxis dataKey="name" hide />
-                    <YAxis hide />
-                    <Tooltip contentStyle={{background: 'var(--bg-sidebar)', border: '1px solid var(--glass-border)', borderRadius: '12px'}}/>
-                    <Area type="monotone" dataKey="balance" stroke="var(--accent-primary)" strokeWidth={4} fillOpacity={1} fill="url(#colorBalance)" />
+                    <XAxis dataKey="name" hide /><YAxis hide /><Tooltip contentStyle={{background: 'var(--bg-sidebar)', border: '1px solid var(--glass-border)', borderRadius: '12px'}}/>
+                    <Area type="monotone" dataKey="balance" stroke="var(--accent-primary)" strokeWidth={4} fill="rgba(0, 255, 136, 0.1)" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
+          </div>
+        )}
 
-            <div className="glass-panel">
-              <h2 className="mb-6">Recent Records</h2>
-              <table>
-                <thead>
-                  <tr><th>Date</th><th>Description</th><th style={{textAlign: 'right'}}>Amount</th></tr>
-                </thead>
-                <tbody>
-                  {transactions.slice().reverse().slice(0, 10).map(t => (
-                    <tr key={t.id}>
-                      <td style={{color: 'var(--text-muted)'}}>{t.date}</td>
-                      <td>
-                        <div style={{fontWeight: '700'}}>{t.nickname || t.entity}</div>
-                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '400px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{t.description}</div>
-                      </td>
-                      <td style={{textAlign: 'right', fontWeight: '800'}} className={t.type === 'CREDIT' ? 'badge-credit' : 'badge-debit'}>
-                        {t.type === 'CREDIT' ? '+' : '-'}{formatCurrency(t.amount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {activeTab === 'chat' && (
+          <div className="view-fade-in chat-container">
+            <div className="glass-panel chat-box">
+              <div className="chat-messages">
+                {chatHistory.length === 0 && (
+                  <div className="chat-welcome">
+                    <Bot size={48} color="var(--accent-primary)" />
+                    <h2>How can I help you, {rawData.metadata.name}?</h2>
+                    <p>Ask me about your spending patterns, top merchants, or for some financial advice.</p>
+                  </div>
+                )}
+                {chatHistory.map((msg, i) => (
+                  <div key={i} className={`message ${msg.role}`}>
+                    <div className="message-content">{msg.text}</div>
+                  </div>
+                ))}
+                {isTyping && (
+                  <div className="message ai">
+                    <div className="message-content typing">Analying data...</div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+              <div className="chat-input-area">
+                <input 
+                  type="text" 
+                  placeholder="Ask your AI analyst..." 
+                  value={chatInput} 
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                />
+                <button onClick={handleSendMessage} disabled={!chatInput.trim() || isTyping}>
+                  <Send size={20} />
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -280,9 +314,9 @@ function App() {
             <div className="glass-panel">
               <div className="flex justify-between items-center mb-6">
                 <h2>All Maintenance Logs</h2>
-                <div className="search-box" style={{background: 'rgba(255,255,255,0.05)', padding: '10px 20px', borderRadius: '12px', display: 'flex', gap: '10px', alignItems: 'center', width: '300px'}}>
+                <div className="search-box">
                   <Search size={18} color="var(--text-muted)" />
-                  <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{background: 'none', border: 'none', color: 'white', outline: 'none'}} />
+                  <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
               </div>
               <table>
@@ -313,11 +347,11 @@ function App() {
         )}
 
         {editingId && (
-          <div className="modal-overlay" style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000}}>
+          <div className="modal-overlay">
             <div className="glass-panel" style={{width: '400px'}}>
               <h2 className="mb-4">Edit Entry</h2>
-              <input type="text" value={editValue} onChange={(e)=>setEditValue(e.target.value)} placeholder="Rename" style={{width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '8px', color: 'white', marginBottom: '12px'}} />
-              <textarea value={editNote} onChange={(e)=>setEditNote(e.target.value)} placeholder="Maintenance Notes" style={{width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '8px', color: 'white', minHeight: '100px', marginBottom: '16px'}} />
+              <input type="text" value={editValue} onChange={(e)=>setEditValue(e.target.value)} placeholder="Rename" className="edit-input" />
+              <textarea value={editNote} onChange={(e)=>setEditNote(e.target.value)} placeholder="Maintenance Notes" className="edit-textarea" />
               <div className="flex gap-2">
                 <button onClick={() => {
                   const updated = transactions.map(t => t.id === editingId ? {...t, nickname: editValue, notes: editNote} : t);
@@ -326,8 +360,8 @@ function App() {
                   saved[editingId] = { nickname: editValue, notes: editNote };
                   localStorage.setItem('txn_overrides', JSON.stringify(saved));
                   setEditingId(null);
-                }} style={{flex: 1, background: 'var(--accent-primary)', color: 'black', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: '800', cursor: 'pointer'}}>SAVE</button>
-                <button onClick={() => setEditingId(null)} style={{flex: 1, background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: '800', cursor: 'pointer'}}>CANCEL</button>
+                }} className="btn-primary">SAVE</button>
+                <button onClick={() => setEditingId(null)} className="btn-secondary">CANCEL</button>
               </div>
             </div>
           </div>
@@ -335,9 +369,34 @@ function App() {
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
-        .flex { display: flex; } .justify-between { justify-content: space-between; } .items-center { align-items: center; } .gap-2 { gap: 8px; } .gap-4 { gap: 16px; } .mb-2 { margin-bottom: 8px; } .mb-4 { margin-bottom: 16px; } .mb-6 { margin-bottom: 24px; } .p-4 { padding: 16px; }
+        .flex { display: flex; } .justify-between { justify-content: space-between; } .items-center { align-items: center; } .gap-2 { gap: 8px; } .mb-4 { margin-bottom: 16px; } .mb-6 { margin-bottom: 24px; }
         .btn-icon { background: none; border: none; cursor: pointer; padding: 8px; border-radius: 50%; transition: background 0.3s; }
         .btn-icon:hover { background: rgba(255,255,255,0.1); }
+        .btn-primary { flex: 1; background: var(--accent-primary); color: black; border: none; padding: 12px; border-radius: 8px; font-weight: 800; cursor: pointer; }
+        .btn-secondary { flex: 1; background: rgba(255,255,255,0.1); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: 800; cursor: pointer; }
+        .edit-input, .edit-textarea { width: 100%; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 8px; color: white; margin-bottom: 12px; font-family: inherit; }
+        .search-box { background: rgba(255,255,255,0.05); padding: 10px 20px; border-radius: 12px; display: flex; gap: 10px; align-items: center; width: 300px; border: 1px solid var(--glass-border); }
+        .search-box input { background: none; border: none; color: white; outline: none; }
+        
+        /* Chat Styles */
+        .chat-container { height: 70vh; display: flex; flex-direction: column; }
+        .chat-box { flex: 1; display: flex; flex-direction: column; padding: 0 !important; overflow: hidden; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 30px; display: flex; flex-direction: column; gap: 20px; }
+        .chat-welcome { text-align: center; margin-top: 50px; opacity: 0.7; }
+        .chat-welcome h2 { margin: 20px 0 10px; }
+        .message { max-width: 80%; padding: 16px 20px; border-radius: 20px; font-size: 0.95rem; line-height: 1.5; }
+        .message.user { align-self: flex-end; background: var(--accent-primary); color: black; border-bottom-right-radius: 4px; }
+        .message.ai { align-self: flex-start; background: var(--bg-sidebar); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
+        .chat-input-area { padding: 20px; border-top: 1px solid var(--glass-border); display: flex; gap: 12px; background: rgba(255,255,255,0.02); }
+        .chat-input-area input { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px 20px; color: white; outline: none; transition: border-color 0.3s; }
+        .chat-input-area input:focus { border-color: var(--accent-primary); }
+        .chat-input-area button { background: var(--accent-primary); color: black; border: none; padding: 0 20px; border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
+        .chat-input-area button:hover { transform: scale(1.05); }
+        .chat-input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .typing { font-style: italic; opacity: 0.7; }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .btn-sync { background: var(--accent-primary); color: black; border: none; padding: 10px 20px; border-radius: 12px; font-weight: 800; cursor: pointer; display: flex; gap: 8px; align-items: center; transition: all 0.2s; }
+        .btn-sync:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,255,136,0.3); }
       `}} />
     </div>
   );
