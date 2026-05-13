@@ -6,6 +6,7 @@ import cors from 'cors';
 import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { v4 as uuidv4 } from 'uuid';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,34 +21,70 @@ app.use(express.static(path.join(__dirname, 'dist')));
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-// Chat Endpoint
-app.post('/api/chat', async (req, res) => {
-  const { message, history } = req.body;
+// --- Chat Session Endpoints ---
+
+const getChats = () => {
+  const chatPath = path.join(__dirname, 'src', 'chats.json');
+  if (!fs.existsSync(chatPath)) return { sessions: [] };
+  return JSON.parse(fs.readFileSync(chatPath, 'utf8'));
+};
+
+const saveChats = (data) => {
+  const chatPath = path.join(__dirname, 'src', 'chats.json');
+  fs.writeFileSync(chatPath, JSON.stringify(data, null, 2));
+  
+  // Persistence via Git
+  if (process.env.GITHUB_TOKEN) {
+    const repoUrl = `https://${process.env.GITHUB_TOKEN}@github.com/Githubds12/finance-dashboard.git`;
+    const cmd = `
+      git config user.email "bot@render.com" && \
+      git config user.name "Render Bot" && \
+      git add src/chats.json && \
+      git commit -m "Persist chat history" && \
+      git push ${repoUrl} master
+    `;
+    exec(cmd);
+  }
+};
+
+app.get('/api/chats', (req, res) => {
+  res.json(getChats());
+});
+
+app.post('/api/chats', (req, res) => {
+  const { title } = req.body;
+  const chats = getChats();
+  const newSession = {
+    id: uuidv4(),
+    title: title || 'New Analysis',
+    timestamp: new Date().toISOString(),
+    history: []
+  };
+  chats.sessions.unshift(newSession);
+  saveChats(chats);
+  res.json(newSession);
+});
+
+app.post('/api/chat/:sessionId', async (req, res) => {
+  const { message } = req.body;
+  const { sessionId } = req.params;
+  const chats = getChats();
+  const session = chats.sessions.find(s => s.id === sessionId);
+  
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
   const dataPath = path.join(__dirname, 'src', 'data.json');
+  const financialData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
 
   try {
-    const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-    // Construct Context for AI
-    const financialContext = `
-      You are a Professional Financial Analyst. You have access to the user's bank transactions.
-      User Name: ${data.metadata.name}
-      Current Balance: ${data.transactions[data.transactions.length - 1]?.balance}
-      Total Transactions: ${data.transactions.length}
-      
-      Instructions:
-      1. Provide concise, helpful financial advice.
-      2. If asked about spending, analyze the transaction history.
-      3. Be encouraging but realistic.
-      4. Always format currency in INR (₹).
-    `;
+    const financialContext = `You are a Professional Financial Analyst. User: ${financialData.metadata.name}. Context: Current Balance ${financialData.transactions[financialData.transactions.length-1]?.balance}. Format all currency in ₹.`;
 
     const chat = model.startChat({
       history: [
         { role: "user", parts: [{ text: financialContext }] },
-        { role: "model", parts: [{ text: "Understood. I am ready to analyze your financial data and provide insights. How can I help you today?" }] },
-        ...history.map(h => ({
+        { role: "model", parts: [{ text: "Analyst active." }] },
+        ...session.history.map(h => ({
           role: h.role === 'user' ? 'user' : 'model',
           parts: [{ text: h.text }]
         }))
@@ -56,15 +93,20 @@ app.post('/api/chat', async (req, res) => {
 
     const result = await chat.sendMessage(message);
     const response = await result.response;
-    res.json({ text: response.text() });
+    const aiText = response.text();
 
+    session.history.push({ role: 'user', text: message });
+    session.history.push({ role: 'ai', text: aiText });
+    saveChats(chats);
+
+    res.json({ text: aiText });
   } catch (err) {
-    console.error('Chat Error:', err);
-    res.status(500).json({ error: 'Failed to connect to AI Analyst.' });
+    console.error(err);
+    res.status(500).json({ error: 'AI error' });
   }
 });
 
-// Sync Endpoint
+// --- Legacy Sync Endpoint ---
 app.post('/api/sync', (req, res) => {
   const overrides = req.body;
   const dataPath = path.join(__dirname, 'src', 'data.json');
@@ -78,30 +120,12 @@ app.post('/api/sync', (req, res) => {
       return t;
     });
     fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-
-    if (process.env.GITHUB_TOKEN) {
-      const repoUrl = `https://${process.env.GITHUB_TOKEN}@github.com/Githubds12/finance-dashboard.git`;
-      const cmd = `
-        git config user.email "bot@render.com" && \
-        git config user.name "Render Bot" && \
-        git add src/data.json && \
-        git commit -m "Auto-sync notes" && \
-        git push ${repoUrl} master
-      `;
-      exec(cmd, (error, stdout, stderr) => {
-        if (error) console.error('Git Push Error:', stderr);
-      });
-    }
     res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
