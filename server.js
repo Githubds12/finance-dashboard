@@ -33,14 +33,13 @@ const saveChats = (data) => {
   const chatPath = path.join(__dirname, 'src', 'chats.json');
   fs.writeFileSync(chatPath, JSON.stringify(data, null, 2));
   
-  // Persistence via Git
   if (process.env.GITHUB_TOKEN) {
     const repoUrl = `https://${process.env.GITHUB_TOKEN}@github.com/Githubds12/finance-dashboard.git`;
     const cmd = `
       git config user.email "bot@render.com" && \
       git config user.name "Render Bot" && \
       git add src/chats.json && \
-      git commit -m "Persist chat history" && \
+      git commit -m "Update chat session history/meta" && \
       git push ${repoUrl} master
     `;
     exec(cmd);
@@ -56,13 +55,26 @@ app.post('/api/chats', (req, res) => {
   const chats = getChats();
   const newSession = {
     id: uuidv4(),
-    title: title || 'New Analysis',
+    title: title || `Analysis ${chats.sessions.length + 1}`,
     timestamp: new Date().toISOString(),
     history: []
   };
   chats.sessions.unshift(newSession);
   saveChats(chats);
   res.json(newSession);
+});
+
+// New: Rename Session
+app.patch('/api/chats/:id', (req, res) => {
+  const { title } = req.body;
+  const { id } = req.params;
+  const chats = getChats();
+  const session = chats.sessions.find(s => s.id === id);
+  if (session) {
+    session.title = title;
+    saveChats(chats);
+    res.json(session);
+  } else res.status(404).json({ error: 'Not found' });
 });
 
 app.post('/api/chat/:sessionId', async (req, res) => {
@@ -78,7 +90,7 @@ app.post('/api/chat/:sessionId', async (req, res) => {
 
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const financialContext = `You are a Professional Financial Analyst. User: ${financialData.metadata.name}. Context: Current Balance ${financialData.transactions[financialData.transactions.length-1]?.balance}. Format all currency in ₹.`;
+    const financialContext = `You are a Professional Financial Analyst. User: ${financialData.metadata.name}. Format all currency in ₹.`;
 
     const chat = model.startChat({
       history: [
@@ -101,12 +113,11 @@ app.post('/api/chat/:sessionId', async (req, res) => {
 
     res.json({ text: aiText });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'AI error' });
   }
 });
 
-// --- Legacy Sync Endpoint ---
+// Sync Endpoint
 app.post('/api/sync', (req, res) => {
   const overrides = req.body;
   const dataPath = path.join(__dirname, 'src', 'data.json');
