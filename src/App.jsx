@@ -18,7 +18,8 @@ import {
   Bot,
   Plus,
   Trash2,
-  Clock
+  Clock,
+  Check
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -46,7 +47,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [showNewSessModal, setShowNewSessModal] = useState(false);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [newSessTitle, setNewSessTitle] = useState('');
   const chatEndRef = useRef(null);
 
@@ -88,7 +89,10 @@ function App() {
   };
 
   const handleCreateSession = async () => {
-    if (!newSessTitle.trim()) return;
+    if (!newSessTitle.trim()) {
+      setIsCreatingSession(false);
+      return;
+    }
     try {
       const res = await fetch('/api/chats', {
         method: 'POST',
@@ -98,7 +102,7 @@ function App() {
       const newSess = await res.json();
       setSessions([newSess, ...sessions]);
       setActiveSessionId(newSess.id);
-      setShowNewSessModal(false);
+      setIsCreatingSession(false);
       setNewSessTitle('');
     } catch (err) { console.error('Failed to create session'); }
   };
@@ -177,10 +181,27 @@ function App() {
           <div className="view-fade-in analyst-manager">
             {/* Session Sidebar */}
             <div className="session-sidebar">
-              <button className="btn-new-chat" onClick={() => setShowNewSessModal(true)}>
+              <button className="btn-new-chat" onClick={() => setIsCreatingSession(true)}>
                 <Plus size={18} /> New Analysis
               </button>
               <div className="session-list">
+                {isCreatingSession && (
+                  <div className="session-item-input">
+                    <input 
+                      type="text" 
+                      placeholder="Title..." 
+                      value={newSessTitle}
+                      onChange={(e) => setNewSessTitle(e.target.value)}
+                      onBlur={handleCreateSession}
+                      onKeyPress={(e) => e.key === 'Enter' && handleCreateSession()}
+                      autoFocus
+                    />
+                    <div className="input-actions">
+                      <Check size={14} onClick={handleCreateSession} />
+                      <X size={14} onClick={() => setIsCreatingSession(false)} />
+                    </div>
+                  </div>
+                )}
                 {sessions.map(s => (
                   <div 
                     key={s.id} 
@@ -278,32 +299,6 @@ function App() {
         )}
       </div>
 
-      {/* New Session Modal (FANCY) */}
-      {showNewSessModal && (
-        <div className="modal-overlay">
-          <div className="glass-panel modal-content-fancy">
-            <div className="modal-header">
-              <Bot size={24} color="var(--accent-primary)" />
-              <h2>New Analysis Session</h2>
-            </div>
-            <p className="modal-desc">Give your analysis a title to keep your history organized.</p>
-            <input 
-              type="text" 
-              className="edit-input" 
-              placeholder="e.g. Monthly Budget Review" 
-              value={newSessTitle}
-              onChange={(e) => setNewSessTitle(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleCreateSession()}
-              autoFocus
-            />
-            <div className="flex gap-4 mt-6">
-              <button className="btn-primary" onClick={handleCreateSession}>CREATE SESSION</button>
-              <button className="btn-secondary" onClick={() => setShowNewSessModal(false)}>CANCEL</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Legacy Edit Modal */}
       {editingId && (
         <div className="modal-overlay">
@@ -338,6 +333,12 @@ function App() {
         .session-title { font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .session-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 4px; }
         
+        .session-item-input { padding: 8px 12px; background: rgba(0,255,136,0.05); border: 1px dashed var(--accent-primary); border-radius: 10px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+        .session-item-input input { flex: 1; background: none; border: none; color: white; font-size: 0.85rem; outline: none; }
+        .input-actions { display: flex; gap: 6px; color: var(--text-muted); }
+        .input-actions svg { cursor: pointer; transition: color 0.2s; }
+        .input-actions svg:hover { color: white; }
+
         .chat-interface { flex: 1; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
         .chat-header { padding: 20px 30px; border-bottom: 1px solid var(--glass-border); background: rgba(255,255,255,0.01); }
         .chat-status { font-size: 0.75rem; color: var(--accent-primary); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
@@ -351,16 +352,6 @@ function App() {
         .chat-input-area { padding: 24px 30px; border-top: 1px solid var(--glass-border); display: flex; gap: 12px; }
         .chat-input-area input { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px 20px; color: white; outline: none; }
         .chat-input-area button { background: var(--accent-primary); color: black; border: none; padding: 0 20px; border-radius: 12px; cursor: pointer; }
-
-        /* Fancy Modal Styles */
-        .modal-content-fancy { width: 450px; padding: 40px; }
-        .modal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-        .modal-header h2 { margin: 0; font-size: 1.5rem; }
-        .modal-desc { color: var(--text-muted); margin-bottom: 24px; font-size: 0.9rem; }
-        .mt-6 { margin-top: 24px; }
-        .btn-primary { flex: 1; background: var(--accent-primary); color: black; border: none; padding: 12px; border-radius: 12px; font-weight: 800; cursor: pointer; transition: all 0.2s; }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,255,136,0.3); }
-        .btn-secondary { flex: 1; background: rgba(255,255,255,0.05); color: white; border: 1px solid var(--glass-border); padding: 12px; border-radius: 12px; font-weight: 800; cursor: pointer; }
       `}} />
     </div>
   );
