@@ -245,7 +245,7 @@ function App() {
             LIVE ANALYST
           </div>
           <h1 className="dashboard-title">
-            {activeTab === 'chat' ? 'Analyst Manager [DEBUG]' : 'Dashboard [DEBUG]'}
+            {activeTab === 'chat' ? 'Analyst Manager' : 'Dashboard'}
           </h1>
         </div>
 
