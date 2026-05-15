@@ -42,9 +42,7 @@ function App() {
   
   // Advanced Chat State
   const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState(() => {
-    return localStorage.getItem('active_session_id');
-  });
+  const [activeSessionId, setActiveSessionId] = useState(() => localStorage.getItem('active_session_id'));
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   
@@ -74,57 +72,44 @@ function App() {
     });
     setTransactions(merged);
     
-    // Load local sessions first for instant UI
-    const localSess = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
-    setSessions(localSess);
-    
+    // Initial fetch from server
     fetchSessions();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('ai_sessions', JSON.stringify(sessions));
     if (activeSessionId) localStorage.setItem('active_session_id', activeSessionId);
-  }, [sessions, activeSessionId]);
+  }, [activeSessionId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeSessionId, sessions, isTyping]);
+  }, [sessions, isTyping]);
 
   const fetchSessions = async () => {
     try {
       const res = await fetch('/api/chats');
       if (res.ok) {
         const data = await res.json();
-        if (data.sessions && data.sessions.length > 0) {
-          setSessions(data.sessions);
-          if (!activeSessionId) setActiveSessionId(data.sessions[0].id);
+        setSessions(data.sessions);
+        if (data.sessions.length > 0 && !activeSessionId) {
+          setActiveSessionId(data.sessions[0].id);
         }
       }
-    } catch (err) { console.warn('Backend sync unavailable, using local store'); }
+    } catch (err) { console.error('Sync failed'); }
   };
 
   const createNewSession = async () => {
-    const newId = `sess_${Date.now()}`;
-    const newSess = {
-      id: newId,
-      title: `Analysis ${sessions.length + 1}`,
-      timestamp: new Date().toISOString(),
-      history: []
-    };
-    
-    setSessions([newSess, ...sessions]);
-    setActiveSessionId(newId);
-    setRenamingId(newId);
-    setRenameValue(newSess.title);
-
-    // Background sync attempt
     try {
-      fetch('/api/chats', {
+      const res = await fetch('/api/chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newSess.title })
+        body: JSON.stringify({})
       });
-    } catch (e) {}
+      const newSess = await res.json();
+      setSessions([newSess, ...sessions]);
+      setActiveSessionId(newSess.id);
+      setRenamingId(newSess.id);
+      setRenameValue(newSess.title);
+    } catch (err) { console.error('Create failed'); }
   };
 
   const handleRename = async (id) => {
@@ -132,17 +117,17 @@ function App() {
       setRenamingId(null);
       return;
     }
-    const updated = sessions.map(s => s.id === id ? { ...s, title: renameValue } : s);
-    setSessions(updated);
-    setRenamingId(null);
-
     try {
-      fetch(`/api/chats/${id}`, {
+      const res = await fetch(`/api/chats/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: renameValue })
       });
-    } catch (e) {}
+      if (res.ok) {
+        setSessions(sessions.map(s => s.id === id ? { ...s, title: renameValue } : s));
+      }
+      setRenamingId(null);
+    } catch (err) { console.error('Rename failed'); }
   };
 
   const handleSendMessage = async () => {
@@ -151,45 +136,20 @@ function App() {
     setChatInput('');
     setIsTyping(true);
 
-    // Update local history immediately
-    const updatedSessions = sessions.map(s => {
-      if (s.id === activeSessionId) {
-        return { ...s, history: [...s.history, { role: 'user', text: msg }] };
-      }
-      return s;
-    });
-    setSessions(updatedSessions);
+    // Optimistic Update
+    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, history: [...s.history, { role: 'user', text: msg }] } : s));
 
     try {
-      // 1. Try Finance Backend
-      let res = await fetch(`/api/chat/${activeSessionId}`, {
+      const res = await fetch(`/api/chat/${activeSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg })
       });
+      const data = await res.json();
       
-      let aiText = '';
-      if (res.ok) {
-        const data = await res.json();
-        aiText = data.text;
-      } else {
-        // 2. Fallback to Unified Portal Proxy
-        const proxyRes = await fetch('https://service-progress-portal.onrender.com/api/agent/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg })
-        });
-        const proxyData = await proxyRes.json();
-        aiText = proxyData.choices?.[0]?.message?.content || proxyData.candidates?.[0]?.content?.parts?.[0]?.text || 'System offline.';
-      }
-
-      setSessions(prev => prev.map(s => {
-        if (s.id === activeSessionId) {
-          return { ...s, history: [...s.history, { role: 'bot', text: aiText }] };
-        }
-        return s;
-      }));
-
+      setSessions(prev => prev.map(s => 
+        s.id === activeSessionId ? { ...s, history: [...s.history, { role: 'ai', text: data.text }] } : s
+      ));
     } catch (err) {
       console.error('Chat error');
     } finally {
@@ -218,10 +178,8 @@ function App() {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
   };
 
-  const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
-
   return (
-    <div className={`layout ${activeTab === 'chat' ? 'ai-mode' : ''}`}>
+    <div className="layout">
       {/* Sidebar Navigation */}
       <div className="sidebar">
         <div className={`sidebar-item ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')}>
@@ -250,10 +208,11 @@ function App() {
         </div>
 
         {activeTab === 'chat' ? (
-          <div className="view-fade-in ai-workspace">
-            <div className={`ai-sidebar ${aiSidebarCollapsed ? 'collapsed' : ''}`}>
-               <button className="btn-new-analysis" onClick={createNewSession}>
-                <Plus size={18} /> NEW ANALYSIS
+          <div className="view-fade-in ai-layout">
+            {/* Session Sidebar */}
+            <div className="ai-sidebar">
+              <button className="btn-new-chat" onClick={createNewSession}>
+                <Plus size={18} /> New Analysis
               </button>
               <div className="session-list">
                 {sessions.map(s => (
@@ -294,84 +253,59 @@ function App() {
               </div>
             </div>
 
-            <div className="ai-main-chat">
+            {/* Chat Area */}
+            <div className="ai-chat-area">
               {activeSession ? (
                 <>
-                  <div className="chat-header-stealth">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                      <button className="ui-btn" onClick={() => setAiSidebarCollapsed(!aiSidebarCollapsed)}>
-                        <MoreVertical size={14} /> PANEL
-                      </button>
-                      <h2>{activeSession.title}</h2>
-                      <button className="ui-btn" onClick={() => {
-                        setRenamingId(activeSession.id);
-                        setRenameValue(activeSession.title);
-                      }}>
-                        <Edit2 size={12} /> RENAME
-                      </button>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <button className="ui-btn" style={{ color: '#ef4444' }} onClick={async () => {
-                        if (confirm("Clear session history?")) {
-                          const updated = sessions.map(s => s.id === activeSessionId ? { ...s, history: [] } : s);
-                          setSessions(updated);
-                          try { fetch(`/api/chat/${activeSession.id}/clear`, { method: 'POST' }); } catch(e){}
-                        }
-                      }}>CLEAR</button>
-                      <button className="ui-btn" style={{ background: 'var(--accent-primary)', color: '#000', border: 'none' }} onClick={() => setActiveTab('home')}>
-                         EXIT
-                      </button>
-                    </div>
+                  <div className="chat-header-minimal">
+                    <h2>{activeSession.title}</h2>
+                    <div className="engine-tag">GEMINI 1.5 FLASH</div>
                   </div>
-                  
-                  <div className="chat-messages-stealth">
-                    <div className="chat-messages-inner">
-                      {activeSession.history.length === 0 && (
-                        <div className="chat-welcome">
-                          <Bot size={48} color="var(--accent-primary)" />
-                          <h2>Ready to analyze, {rawData.metadata.name}.</h2>
-                          <p>Ask me to look into your {rawData.metadata.merged_count} transactions.</p>
-                        </div>
-                      )}
-                      {activeSession.history.map((msg, i) => (
-                        <div key={i} className={`ai-bubble-stealth ${msg.role === 'user' ? 'user' : 'bot'}`}>
-                          {msg.text}
-                        </div>
-                      ))}
-                      {isTyping && (
-                        <div className="ai-bubble-stealth bot">
-                          Analyzing statements...
-                        </div>
-                      )}
-                      <div ref={chatEndRef} />
-                    </div>
+                  <div className="chat-body">
+                    {activeSession.history.length === 0 && (
+                      <div className="chat-welcome">
+                        <Bot size={48} color="var(--accent-primary)" />
+                        <h2>Ready to analyze, {rawData.metadata.name}.</h2>
+                        <p>Ask me anything about your {rawData.metadata.merged_count} transactions.</p>
+                      </div>
+                    )}
+                    {activeSession.history.map((msg, i) => (
+                      <div key={i} className={`message-bubble ${msg.role}`}>
+                        <div className="bubble-content">{msg.text}</div>
+                      </div>
+                    ))}
+                    {isTyping && (
+                      <div className="message-bubble ai">
+                        <div className="bubble-content typing">Analyzing statements...</div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
                   </div>
-
-                  <div className="chat-input-area-stealth">
-                    <div className="chat-input-container">
+                  <div className="chat-footer">
+                    <div className="input-wrapper">
                       <input 
                         type="text" 
-                        placeholder="Request financial intelligence..." 
+                        placeholder="Type your question..." 
                         value={chatInput} 
                         onChange={(e) => setChatInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                       />
                       <button onClick={handleSendMessage} disabled={!chatInput.trim() || isTyping}>
-                        Analyze
+                        <Send size={18} />
                       </button>
                     </div>
                   </div>
                 </>
               ) : (
-                <div className="chat-empty">
+                <div className="chat-empty-state">
                   <MessageSquare size={64} opacity={0.1} />
-                  <p>Select or create a new analysis session.</p>
+                  <p>Select a session to begin analysis</p>
                 </div>
               )}
             </div>
           </div>
         ) : (
-          <div className="view-fade-in">
+          <div className="view-fade-in dashboard-content">
              {activeTab === 'home' && (
               <>
                 <div className="hero-banner">
@@ -430,39 +364,51 @@ function App() {
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
-        .analyst-manager { display: flex; height: 75vh; gap: 24px; }
-        .session-sidebar { width: 260px; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 20px; display: flex; flex-direction: column; padding: 16px; }
-        .btn-new-chat { background: var(--accent-primary); color: black; border: none; padding: 12px; border-radius: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; transition: all 0.2s; }
-        .btn-new-chat:hover { transform: scale(1.02); box-shadow: 0 0 20px rgba(0,255,136,0.3); }
-        .session-list { flex: 1; overflow-y: auto; }
+        .ai-layout { display: flex; height: calc(100vh - 150px); gap: 20px; }
         
-        .session-item { padding: 12px; border-radius: 10px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; position: relative; }
+        /* Session Sidebar */
+        .ai-sidebar { width: 280px; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; }
+        .btn-new-chat { background: var(--accent-primary); color: black; border: none; padding: 14px; border-radius: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.8rem; }
+        .btn-new-chat:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(0,255,136,0.3); }
+        .session-list { flex: 1; overflow-y: auto; padding-right: 4px; }
+        .session-item { padding: 14px; border-radius: 12px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
         .session-item:hover { background: rgba(255,255,255,0.05); }
-        .session-item.active { background: rgba(0,255,136,0.1); border-color: var(--accent-primary); }
+        .session-item.active { background: rgba(0,255,136,0.1); border-color: rgba(0,255,136,0.3); }
         .session-info { flex: 1; overflow: hidden; }
-        .session-title { font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-title { font-weight: 700; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .session-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 4px; }
-        
-        .btn-rename-trigger { opacity: 0; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; transition: opacity 0.2s; }
+        .btn-rename-trigger { opacity: 0; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; transition: 0.2s; }
         .session-item:hover .btn-rename-trigger { opacity: 1; }
-        .btn-rename-trigger:hover { color: white; }
+        .btn-rename-trigger:hover { color: var(--accent-primary); }
+        .rename-container input { width: 100%; background: rgba(255,255,255,0.1); border: 1px solid var(--accent-primary); border-radius: 8px; padding: 6px 10px; color: white; font-size: 0.9rem; outline: none; }
 
-        .rename-container { width: 100%; }
-        .rename-container input { width: 100%; background: rgba(255,255,255,0.1); border: 1px solid var(--accent-primary); border-radius: 6px; padding: 4px 8px; color: white; font-size: 0.9rem; outline: none; }
+        /* Chat Area */
+        .ai-chat-area { flex: 1; background: rgba(255,255,255,0.01); border: 1px solid var(--glass-border); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
+        .chat-header-minimal { padding: 20px 30px; border-bottom: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.01); }
+        .chat-header-minimal h2 { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.5px; }
+        .engine-tag { font-size: 0.65rem; font-weight: 900; color: var(--accent-primary); background: rgba(0,255,136,0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(0,255,136,0.2); }
+        
+        .chat-body { flex: 1; overflow-y: auto; padding: 30px; display: flex; flex-direction: column; gap: 20px; }
+        .chat-welcome { text-align: center; margin-top: 100px; opacity: 0.8; }
+        .chat-welcome h2 { margin: 20px 0 10px; }
+        .chat-welcome p { color: var(--text-muted); }
 
-        .chat-interface { flex: 1; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
-        .chat-header { padding: 20px 30px; border-bottom: 1px solid var(--glass-border); background: rgba(255,255,255,0.01); }
-        .chat-status { font-size: 0.75rem; color: var(--accent-primary); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
-        .chat-messages { flex: 1; overflow-y: auto; padding: 30px; display: flex; flex-direction: column; gap: 24px; }
-        .chat-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.3; }
+        .message-bubble { max-width: 80%; padding: 14px 18px; border-radius: 18px; font-size: 0.95rem; line-height: 1.6; }
+        .message-bubble.user { align-self: flex-end; background: var(--accent-primary); color: #000; border-bottom-right-radius: 4px; font-weight: 600; box-shadow: 0 4px 15px rgba(0,255,136,0.2); }
+        .message-bubble.ai { align-self: flex-start; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
+        .message-bubble.ai .bubble-content { color: rgba(255,255,255,0.9); }
         
-        .message { max-width: 85%; padding: 16px 20px; border-radius: 20px; font-size: 0.95rem; line-height: 1.6; }
-        .message.user { align-self: flex-end; background: var(--accent-primary); color: black; border-bottom-right-radius: 4px; font-weight: 500; }
-        .message.ai { align-self: flex-start; background: var(--bg-sidebar); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
+        .typing { font-style: italic; opacity: 0.6; }
+
+        .chat-footer { padding: 20px 30px; border-top: 1px solid var(--glass-border); background: rgba(0,0,0,0.2); }
+        .input-wrapper { display: flex; gap: 12px; background: rgba(255,255,255,0.05); padding: 6px; border-radius: 16px; border: 1px solid var(--glass-border); transition: 0.2s; }
+        .input-wrapper:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 15px rgba(0,255,136,0.1); }
+        .input-wrapper input { flex: 1; background: none; border: none; padding: 10px 15px; color: white; outline: none; font-size: 0.95rem; }
+        .input-wrapper button { background: var(--accent-primary); color: #000; border: none; width: 44px; height: 44px; border-radius: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .input-wrapper button:hover:not(:disabled) { transform: scale(1.05); }
+        .input-wrapper button:disabled { opacity: 0.3; cursor: not-allowed; }
         
-        .chat-input-area { padding: 24px 30px; border-top: 1px solid var(--glass-border); display: flex; gap: 12px; }
-        .chat-input-area input { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px 20px; color: white; outline: none; }
-        .chat-input-area button { background: var(--accent-primary); color: black; border: none; padding: 0 20px; border-radius: 12px; cursor: pointer; }
+        .chat-empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.3; }
       `}} />
     </div>
   );
