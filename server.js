@@ -135,7 +135,7 @@ app.post('/api/sync', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
