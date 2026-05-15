@@ -16,17 +16,19 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
-app.use(express.static(path.join(__dirname, 'dist')));
 
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-// --- Chat Session Endpoints ---
-
+// --- Helpers ---
 const getChats = () => {
   const chatPath = path.join(__dirname, 'src', 'chats.json');
   if (!fs.existsSync(chatPath)) return { sessions: [] };
-  return JSON.parse(fs.readFileSync(chatPath, 'utf8'));
+  try {
+    return JSON.parse(fs.readFileSync(chatPath, 'utf8'));
+  } catch (e) {
+    return { sessions: [] };
+  }
 };
 
 const saveChats = (data) => {
@@ -46,6 +48,12 @@ const saveChats = (data) => {
   }
 };
 
+// --- API Endpoints (Must be BEFORE static middleware) ---
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
 app.get('/api/chats', (req, res) => {
   res.json(getChats());
 });
@@ -64,7 +72,6 @@ app.post('/api/chats', (req, res) => {
   res.json(newSession);
 });
 
-// New: Rename Session
 app.patch('/api/chats/:id', (req, res) => {
   const { title } = req.body;
   const { id } = req.params;
@@ -86,9 +93,10 @@ app.post('/api/chat/:sessionId', async (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
   const dataPath = path.join(__dirname, 'src', 'data.json');
-  const financialData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
-
+  if (!fs.existsSync(dataPath)) return res.status(500).json({ error: 'Source data missing' });
+  
   try {
+    const financialData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     const financialContext = `You are a Professional Financial Analyst. User: ${financialData.metadata.name}. Format all currency in ₹.`;
 
@@ -117,7 +125,6 @@ app.post('/api/chat/:sessionId', async (req, res) => {
   }
 });
 
-// Sync Endpoint
 app.post('/api/sync', (req, res) => {
   const overrides = req.body;
   const dataPath = path.join(__dirname, 'src', 'data.json');
@@ -135,6 +142,11 @@ app.post('/api/sync', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// --- Static Middleware (Last) ---
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+// SPA Catch-all
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
