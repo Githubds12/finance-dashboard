@@ -42,7 +42,9 @@ function App() {
   
   // Advanced Chat State
   const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [activeSessionId, setActiveSessionId] = useState(() => {
+    return localStorage.getItem('active_session_id');
+  });
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   
@@ -71,8 +73,18 @@ function App() {
       };
     });
     setTransactions(merged);
+    
+    // Load local sessions first for instant UI
+    const localSess = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+    setSessions(localSess);
+    
     fetchSessions();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('ai_sessions', JSON.stringify(sessions));
+    if (activeSessionId) localStorage.setItem('active_session_id', activeSessionId);
+  }, [sessions, activeSessionId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -81,28 +93,38 @@ function App() {
   const fetchSessions = async () => {
     try {
       const res = await fetch('/api/chats');
-      const data = await res.json();
-      setSessions(data.sessions);
-      if (data.sessions.length > 0 && !activeSessionId) {
-        setActiveSessionId(data.sessions[0].id);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.sessions && data.sessions.length > 0) {
+          setSessions(data.sessions);
+          if (!activeSessionId) setActiveSessionId(data.sessions[0].id);
+        }
       }
-    } catch (err) { console.error('Failed to fetch sessions'); }
+    } catch (err) { console.warn('Backend sync unavailable, using local store'); }
   };
 
   const createNewSession = async () => {
+    const newId = `sess_${Date.now()}`;
+    const newSess = {
+      id: newId,
+      title: `Analysis ${sessions.length + 1}`,
+      timestamp: new Date().toISOString(),
+      history: []
+    };
+    
+    setSessions([newSess, ...sessions]);
+    setActiveSessionId(newId);
+    setRenamingId(newId);
+    setRenameValue(newSess.title);
+
+    // Background sync attempt
     try {
-      const res = await fetch('/api/chats', {
+      fetch('/api/chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}) // Backend will generate a default title
+        body: JSON.stringify({ title: newSess.title })
       });
-      const newSess = await res.json();
-      setSessions([newSess, ...sessions]);
-      setActiveSessionId(newSess.id);
-      // Immediately start renaming it so user can change it if they want
-      setRenamingId(newSess.id);
-      setRenameValue(newSess.title);
-    } catch (err) { console.error('Failed to create session'); }
+    } catch (e) {}
   };
 
   const handleRename = async (id) => {
@@ -110,15 +132,17 @@ function App() {
       setRenamingId(null);
       return;
     }
+    const updated = sessions.map(s => s.id === id ? { ...s, title: renameValue } : s);
+    setSessions(updated);
+    setRenamingId(null);
+
     try {
-      await fetch(`/api/chats/${id}`, {
+      fetch(`/api/chats/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: renameValue })
       });
-      setSessions(sessions.map(s => s.id === id ? { ...s, title: renameValue } : s));
-      setRenamingId(null);
-    } catch (err) { console.error('Rename failed'); }
+    } catch (e) {}
   };
 
   const handleSendMessage = async () => {
@@ -127,13 +151,45 @@ function App() {
     setChatInput('');
     setIsTyping(true);
 
+    // Update local history immediately
+    const updatedSessions = sessions.map(s => {
+      if (s.id === activeSessionId) {
+        return { ...s, history: [...s.history, { role: 'user', text: msg }] };
+      }
+      return s;
+    });
+    setSessions(updatedSessions);
+
     try {
-      const res = await fetch(`/api/chat/${activeSessionId}`, {
+      // 1. Try Finance Backend
+      let res = await fetch(`/api/chat/${activeSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg })
       });
-      await fetchSessions(); // Refresh history
+      
+      let aiText = '';
+      if (res.ok) {
+        const data = await res.json();
+        aiText = data.text;
+      } else {
+        // 2. Fallback to Unified Portal Proxy
+        const proxyRes = await fetch('https://service-progress-portal.onrender.com/api/agent/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg })
+        });
+        const proxyData = await proxyRes.json();
+        aiText = proxyData.choices?.[0]?.message?.content || proxyData.candidates?.[0]?.content?.parts?.[0]?.text || 'System offline.';
+      }
+
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return { ...s, history: [...s.history, { role: 'bot', text: aiText }] };
+        }
+        return s;
+      }));
+
     } catch (err) {
       console.error('Chat error');
     } finally {
@@ -162,8 +218,10 @@ function App() {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
   };
 
+  const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
+
   return (
-    <div className="layout">
+    <div className={`layout ${activeTab === 'chat' ? 'ai-mode' : ''}`}>
       {/* Sidebar Navigation */}
       <div className="sidebar">
         <div className={`sidebar-item ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')}>
@@ -187,16 +245,15 @@ function App() {
             LIVE ANALYST
           </div>
           <h1 className="dashboard-title">
-            {activeTab === 'chat' ? 'Analyst Manager' : 'Dashboard'}
+            {activeTab === 'chat' ? 'Analyst Manager [DEBUG]' : 'Dashboard [DEBUG]'}
           </h1>
         </div>
 
         {activeTab === 'chat' ? (
-          <div className="view-fade-in analyst-manager">
-            {/* Session Sidebar */}
-            <div className="session-sidebar">
-              <button className="btn-new-chat" onClick={createNewSession}>
-                <Plus size={18} /> New Analysis
+          <div className="view-fade-in ai-workspace">
+            <div className={`ai-sidebar ${aiSidebarCollapsed ? 'collapsed' : ''}`}>
+               <button className="btn-new-analysis" onClick={createNewSession}>
+                <Plus size={18} /> NEW ANALYSIS
               </button>
               <div className="session-list">
                 {sessions.map(s => (
@@ -237,45 +294,72 @@ function App() {
               </div>
             </div>
 
-            {/* Chat Interface */}
-            <div className="chat-interface">
+            <div className="ai-main-chat">
               {activeSession ? (
                 <>
-                  <div className="chat-header">
-                    <h2>{activeSession.title}</h2>
-                    <div className="chat-status">Memory Active • Gemini 1.5</div>
+                  <div className="chat-header-stealth">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                      <button className="ui-btn" onClick={() => setAiSidebarCollapsed(!aiSidebarCollapsed)}>
+                        <MoreVertical size={14} /> PANEL
+                      </button>
+                      <h2>{activeSession.title}</h2>
+                      <button className="ui-btn" onClick={() => {
+                        setRenamingId(activeSession.id);
+                        setRenameValue(activeSession.title);
+                      }}>
+                        <Edit2 size={12} /> RENAME
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <button className="ui-btn" style={{ color: '#ef4444' }} onClick={async () => {
+                        if (confirm("Clear session history?")) {
+                          const updated = sessions.map(s => s.id === activeSessionId ? { ...s, history: [] } : s);
+                          setSessions(updated);
+                          try { fetch(`/api/chat/${activeSession.id}/clear`, { method: 'POST' }); } catch(e){}
+                        }
+                      }}>CLEAR</button>
+                      <button className="ui-btn" style={{ background: 'var(--accent-primary)', color: '#000', border: 'none' }} onClick={() => setActiveTab('home')}>
+                         EXIT
+                      </button>
+                    </div>
                   </div>
-                  <div className="chat-messages">
-                    {activeSession.history.length === 0 && (
-                      <div className="chat-welcome">
-                        <Bot size={48} color="var(--accent-primary)" />
-                        <h2>Ready to analyze, {rawData.metadata.name}.</h2>
-                        <p>Ask me to look into your {rawData.metadata.merged_count} transactions.</p>
-                      </div>
-                    )}
-                    {activeSession.history.map((msg, i) => (
-                      <div key={i} className={`message ${msg.role}`}>
-                        <div className="message-content">{msg.text}</div>
-                      </div>
-                    ))}
-                    {isTyping && (
-                      <div className="message ai">
-                        <div className="message-content typing">Analyzing statements...</div>
-                      </div>
-                    )}
-                    <div ref={chatEndRef} />
+                  
+                  <div className="chat-messages-stealth">
+                    <div className="chat-messages-inner">
+                      {activeSession.history.length === 0 && (
+                        <div className="chat-welcome">
+                          <Bot size={48} color="var(--accent-primary)" />
+                          <h2>Ready to analyze, {rawData.metadata.name}.</h2>
+                          <p>Ask me to look into your {rawData.metadata.merged_count} transactions.</p>
+                        </div>
+                      )}
+                      {activeSession.history.map((msg, i) => (
+                        <div key={i} className={`ai-bubble-stealth ${msg.role === 'user' ? 'user' : 'bot'}`}>
+                          {msg.text}
+                        </div>
+                      ))}
+                      {isTyping && (
+                        <div className="ai-bubble-stealth bot">
+                          Analyzing statements...
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
                   </div>
-                  <div className="chat-input-area">
-                    <input 
-                      type="text" 
-                      placeholder="Ask the analyst..." 
-                      value={chatInput} 
-                      onChange={(e) => setChatInput(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    />
-                    <button onClick={handleSendMessage} disabled={!chatInput.trim() || isTyping}>
-                      <Send size={20} />
-                    </button>
+
+                  <div className="chat-input-area-stealth">
+                    <div className="chat-input-container">
+                      <input 
+                        type="text" 
+                        placeholder="Request financial intelligence..." 
+                        value={chatInput} 
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                      />
+                      <button onClick={handleSendMessage} disabled={!chatInput.trim() || isTyping}>
+                        Analyze
+                      </button>
+                    </div>
                   </div>
                 </>
               ) : (
@@ -297,7 +381,48 @@ function App() {
                     <div className="hero-subtitle">Smarter Tracking • Better Decisions • Global Access</div>
                   </div>
                 </div>
-                {/* Metrics grid and chart omitted for brevity, logic preserved */}
+                
+                <div className="metrics-grid">
+                  <div className="metric-card-xl" style={{background: 'linear-gradient(135deg, #6366f1, #a855f7)'}}>
+                    <div className="metric-info">
+                      <h3>Net Worth Estimate</h3>
+                      <div className="metric-value">{formatCurrency(stats.currentBalance)}</div>
+                    </div>
+                    <div className="metric-icon-box"><TrendingUp size={32} color="white" /></div>
+                  </div>
+                  <div className="metric-card-xl" style={{background: 'linear-gradient(135deg, #10b981, #3b82f6)'}}>
+                    <div className="metric-info">
+                      <h3>Total Transactions</h3>
+                      <div className="metric-value">{rawData.metadata.merged_count}</div>
+                    </div>
+                    <div className="metric-icon-box"><Activity size={32} color="white" /></div>
+                  </div>
+                </div>
+
+                <div className="glass-panel" style={{height: '400px'}}>
+                  <div className="flex justify-between items-center mb-6">
+                    <h3>Wealth Trajectory</h3>
+                    <div className="badge badge-credit">REAL-TIME SYNC</div>
+                  </div>
+                  <ResponsiveContainer width="100%" height="90%">
+                    <AreaChart data={stats.chartData}>
+                      <defs>
+                        <linearGradient id="colorBal" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                      <XAxis dataKey="name" hide />
+                      <YAxis hide domain={['auto', 'auto']} />
+                      <Tooltip 
+                        contentStyle={{background: '#0f111a', border: '1px solid var(--glass-border)', borderRadius: '12px'}}
+                        itemStyle={{color: 'var(--accent-primary)'}}
+                      />
+                      <Area type="monotone" dataKey="balance" stroke="var(--accent-primary)" fillOpacity={1} fill="url(#colorBal)" strokeWidth={3} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </>
             )}
           </div>
