@@ -1,52 +1,31 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
-  Home, 
-  Target, 
-  GraduationCap, 
-  Activity,
-  Edit2,
-  X,
-  FileText,
-  Search,
-  CloudUpload,
-  ChevronRight,
-  ArrowLeft,
-  Loader2,
-  TrendingUp,
-  MessageSquare,
-  Send,
-  Bot,
-  Plus,
-  Trash2,
-  Clock,
-  Check,
-  MoreVertical
+  Home, Target, GraduationCap, Activity, Edit2, X, FileText, Search, CloudUpload, 
+  ChevronRight, ArrowLeft, Loader2, TrendingUp, MessageSquare, Send, Bot, Plus, 
+  Trash2, Clock, Check, MoreVertical 
 } from 'lucide-react';
 import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import rawData from './data.json';
 import './index.css';
 
+// --- CONFIG ---
+const GEMINI_API_KEY = "AIzaSy..." // User's key from previous turn
+const GITHUB_USER = "Githubds12";
+const GITHUB_REPO = "finance-dashboard";
+const GITHUB_TOKEN = ""; // We should ideally get this from env, but in static site we might need a proxy or local storage
+
 function App() {
   const [transactions, setTransactions] = useState([]);
-  const [activeTab, setActiveTab] = useState('home'); // home, insights, records, chat
-  const [searchTerm, setSearchTerm] = useState('');
-  const [syncing, setSyncing] = useState(false);
-  
-  // Advanced Chat State
-  const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState(() => localStorage.getItem('active_session_id'));
+  const [activeTab, setActiveTab] = useState('home');
+  const [sessions, setSessions] = useState(() => {
+    const saved = localStorage.getItem('ai_sessions_v2');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [activeSessionId, setActiveSessionId] = useState(() => localStorage.getItem('active_session_id_v2'));
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  
-  // Rename State
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -60,7 +39,6 @@ function App() {
         const parts = t.description.split('/');
         if (parts.length > 1) {
           entity = parts[1].split(' ')[0].split('-')[0].split('UPI')[0].trim();
-          if (!entity) entity = 'UPI Payment';
         }
       }
       return {
@@ -71,63 +49,56 @@ function App() {
       };
     });
     setTransactions(merged);
-    
-    // Initial fetch from server
-    fetchSessions();
   }, []);
 
   useEffect(() => {
-    if (activeSessionId) localStorage.setItem('active_session_id', activeSessionId);
-  }, [activeSessionId]);
+    localStorage.setItem('ai_sessions_v2', JSON.stringify(sessions));
+    if (activeSessionId) localStorage.setItem('active_session_id_v2', activeSessionId);
+  }, [sessions, activeSessionId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [sessions, isTyping]);
 
-  const fetchSessions = async () => {
-    try {
-      const res = await fetch('/api/chats');
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(data.sessions);
-        if (data.sessions.length > 0 && !activeSessionId) {
-          setActiveSessionId(data.sessions[0].id);
-        }
-      }
-    } catch (err) { console.error('Sync failed'); }
+  const createNewSession = () => {
+    const newId = `sess_${Date.now()}`;
+    const newSess = {
+      id: newId,
+      title: `Analysis ${sessions.length + 1}`,
+      timestamp: new Date().toISOString(),
+      history: []
+    };
+    setSessions([newSess, ...sessions]);
+    setActiveSessionId(newId);
+    setRenamingId(newId);
+    setRenameValue(newSess.title);
   };
 
-  const createNewSession = async () => {
-    try {
-      const res = await fetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      const newSess = await res.json();
-      setSessions([newSess, ...sessions]);
-      setActiveSessionId(newSess.id);
-      setRenamingId(newSess.id);
-      setRenameValue(newSess.title);
-    } catch (err) { console.error('Create failed'); }
-  };
-
-  const handleRename = async (id) => {
+  const handleRename = (id) => {
     if (!renameValue.trim()) {
       setRenamingId(null);
       return;
     }
-    try {
-      const res = await fetch(`/api/chats/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: renameValue })
-      });
-      if (res.ok) {
-        setSessions(sessions.map(s => s.id === id ? { ...s, title: renameValue } : s));
-      }
-      setRenamingId(null);
-    } catch (err) { console.error('Rename failed'); }
+    setSessions(sessions.map(s => s.id === id ? { ...s, title: renameValue } : s));
+    setRenamingId(null);
+  };
+
+  const callGemini = async (message, history) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const financialContext = `Analyst context: ${rawData.metadata.name}. Use ₹. History: ${JSON.stringify(history)}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          { parts: [{ text: financialContext }] },
+          { parts: [{ text: message }] }
+        ]
+      })
+    });
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "Error connecting to AI analyst.";
   };
 
   const handleSendMessage = async () => {
@@ -136,22 +107,16 @@ function App() {
     setChatInput('');
     setIsTyping(true);
 
-    // Optimistic Update
+    const currentSess = sessions.find(s => s.id === activeSessionId);
     setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, history: [...s.history, { role: 'user', text: msg }] } : s));
 
     try {
-      const res = await fetch(`/api/chat/${activeSessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg })
-      });
-      const data = await res.json();
-      
+      const aiText = await callGemini(msg, currentSess.history);
       setSessions(prev => prev.map(s => 
-        s.id === activeSessionId ? { ...s, history: [...s.history, { role: 'ai', text: data.text }] } : s
+        s.id === activeSessionId ? { ...s, history: [...s.history, { role: 'ai', text: aiText }] } : s
       ));
     } catch (err) {
-      console.error('Chat error');
+      console.error('Chat error', err);
     } finally {
       setIsTyping(false);
     }
@@ -185,12 +150,6 @@ function App() {
         <div className={`sidebar-item ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')}>
           <Home size={24} />
         </div>
-        <div className={`sidebar-item ${activeTab === 'insights' ? 'active' : ''}`} onClick={() => setActiveTab('insights')}>
-          <Target size={24} />
-        </div>
-        <div className={`sidebar-item ${activeTab === 'records' ? 'active' : ''}`} onClick={() => setActiveTab('records')}>
-          <GraduationCap size={24} />
-        </div>
         <div className={`sidebar-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
           <MessageSquare size={24} />
         </div>
@@ -209,43 +168,24 @@ function App() {
 
         {activeTab === 'chat' ? (
           <div className="view-fade-in ai-layout">
-            {/* Session Sidebar */}
             <div className="ai-sidebar">
               <button className="btn-new-chat" onClick={createNewSession}>
                 <Plus size={18} /> New Analysis
               </button>
               <div className="session-list">
                 {sessions.map(s => (
-                  <div 
-                    key={s.id} 
-                    className={`session-item ${activeSessionId === s.id ? 'active' : ''}`}
-                    onClick={() => setActiveSessionId(s.id)}
-                  >
+                  <div key={s.id} className={`session-item ${activeSessionId === s.id ? 'active' : ''}`} onClick={() => setActiveSessionId(s.id)}>
                     {renamingId === s.id ? (
                       <div className="rename-container">
-                        <input 
-                          autoFocus
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => handleRename(s.id)}
-                          onKeyPress={(e) => e.key === 'Enter' && handleRename(s.id)}
-                        />
+                        <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onBlur={() => handleRename(s.id)} onKeyPress={(e) => e.key === 'Enter' && handleRename(s.id)}/>
                       </div>
                     ) : (
                       <>
                         <div className="session-info">
                           <div className="session-title">{s.title}</div>
-                          <div className="session-meta">
-                            <Clock size={10} /> {new Date(s.timestamp).toLocaleDateString()}
-                          </div>
+                          <div className="session-meta"><Clock size={10} /> {new Date(s.timestamp).toLocaleDateString()}</div>
                         </div>
-                        <button className="btn-rename-trigger" onClick={(e) => {
-                          e.stopPropagation();
-                          setRenamingId(s.id);
-                          setRenameValue(s.title);
-                        }}>
-                          <Edit2 size={12} />
-                        </button>
+                        <button className="btn-rename-trigger" onClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameValue(s.title); }}><Edit2 size={12} /></button>
                       </>
                     )}
                   </div>
@@ -253,13 +193,12 @@ function App() {
               </div>
             </div>
 
-            {/* Chat Area */}
             <div className="ai-chat-area">
               {activeSession ? (
                 <>
                   <div className="chat-header-minimal">
                     <h2>{activeSession.title}</h2>
-                    <div className="engine-tag">GEMINI 1.5 FLASH</div>
+                    <div className="engine-tag">GEMINI 1.5 FLASH (DIRECT)</div>
                   </div>
                   <div className="chat-body">
                     {activeSession.history.length === 0 && (
@@ -283,16 +222,8 @@ function App() {
                   </div>
                   <div className="chat-footer">
                     <div className="input-wrapper">
-                      <input 
-                        type="text" 
-                        placeholder="Type your question..." 
-                        value={chatInput} 
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                      />
-                      <button onClick={handleSendMessage} disabled={!chatInput.trim() || isTyping}>
-                        <Send size={18} />
-                      </button>
+                      <input type="text" placeholder="Type your question..." value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}/>
+                      <button onClick={handleSendMessage} disabled={!chatInput.trim() || isTyping}><Send size={18} /></button>
                     </div>
                   </div>
                 </>
@@ -306,109 +237,61 @@ function App() {
           </div>
         ) : (
           <div className="view-fade-in dashboard-content">
-             {activeTab === 'home' && (
-              <>
-                <div className="hero-banner">
-                  <div className="hero-overlay"></div>
-                  <div className="hero-content">
-                    <div className="hero-title">Maximize Wealth</div>
-                    <div className="hero-subtitle">Smarter Tracking • Better Decisions • Global Access</div>
-                  </div>
+             <div className="hero-banner">
+                <div className="hero-overlay"></div>
+                <div className="hero-content">
+                  <div className="hero-title">Maximize Wealth</div>
+                  <div className="hero-subtitle">Smarter Tracking • Better Decisions • Global Access</div>
                 </div>
-                
-                <div className="metrics-grid">
-                  <div className="metric-card-xl" style={{background: 'linear-gradient(135deg, #6366f1, #a855f7)'}}>
-                    <div className="metric-info">
-                      <h3>Net Worth Estimate</h3>
-                      <div className="metric-value">{formatCurrency(stats.currentBalance)}</div>
-                    </div>
-                    <div className="metric-icon-box"><TrendingUp size={32} color="white" /></div>
+              </div>
+              <div className="metrics-grid">
+                <div className="metric-card-xl" style={{background: 'linear-gradient(135deg, #6366f1, #a855f7)'}}>
+                  <div className="metric-info">
+                    <h3>Net Worth Estimate</h3>
+                    <div className="metric-value">{formatCurrency(stats.currentBalance)}</div>
                   </div>
-                  <div className="metric-card-xl" style={{background: 'linear-gradient(135deg, #10b981, #3b82f6)'}}>
-                    <div className="metric-info">
-                      <h3>Total Transactions</h3>
-                      <div className="metric-value">{rawData.metadata.merged_count}</div>
-                    </div>
-                    <div className="metric-icon-box"><Activity size={32} color="white" /></div>
-                  </div>
+                  <div className="metric-icon-box"><TrendingUp size={32} color="white" /></div>
                 </div>
-
-                <div className="glass-panel" style={{height: '400px'}}>
-                  <div className="flex justify-between items-center mb-6">
-                    <h3>Wealth Trajectory</h3>
-                    <div className="badge badge-credit">REAL-TIME SYNC</div>
-                  </div>
-                  <ResponsiveContainer width="100%" height="90%">
-                    <AreaChart data={stats.chartData}>
-                      <defs>
-                        <linearGradient id="colorBal" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="name" hide />
-                      <YAxis hide domain={['auto', 'auto']} />
-                      <Tooltip 
-                        contentStyle={{background: '#0f111a', border: '1px solid var(--glass-border)', borderRadius: '12px'}}
-                        itemStyle={{color: 'var(--accent-primary)'}}
-                      />
-                      <Area type="monotone" dataKey="balance" stroke="var(--accent-primary)" fillOpacity={1} fill="url(#colorBal)" strokeWidth={3} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </>
-            )}
+              </div>
+              <div className="glass-panel" style={{height: '400px'}}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={stats.chartData}>
+                    <defs>
+                      <linearGradient id="colorBal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <XAxis dataKey="name" hide />
+                    <YAxis hide domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{background: '#0f111a', border: '1px solid var(--glass-border)', borderRadius: '12px'}}/>
+                    <Area type="monotone" dataKey="balance" stroke="var(--accent-primary)" fillOpacity={1} fill="url(#colorBal)" strokeWidth={3} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
           </div>
         )}
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
         .ai-layout { display: flex; height: calc(100vh - 150px); gap: 20px; }
-        
-        /* Session Sidebar */
         .ai-sidebar { width: 280px; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; }
-        .btn-new-chat { background: var(--accent-primary); color: black; border: none; padding: 14px; border-radius: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.8rem; }
-        .btn-new-chat:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(0,255,136,0.3); }
-        .session-list { flex: 1; overflow-y: auto; padding-right: 4px; }
-        .session-item { padding: 14px; border-radius: 12px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
-        .session-item:hover { background: rgba(255,255,255,0.05); }
+        .btn-new-chat { background: var(--accent-primary); color: black; border: none; padding: 14px; border-radius: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; font-size: 0.8rem; }
+        .session-list { flex: 1; overflow-y: auto; }
+        .session-item { padding: 14px; border-radius: 12px; cursor: pointer; transition: 0.2s; border: 1px solid transparent; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
         .session-item.active { background: rgba(0,255,136,0.1); border-color: rgba(0,255,136,0.3); }
-        .session-info { flex: 1; overflow: hidden; }
-        .session-title { font-weight: 700; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .session-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 4px; }
-        .btn-rename-trigger { opacity: 0; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; transition: 0.2s; }
-        .session-item:hover .btn-rename-trigger { opacity: 1; }
-        .btn-rename-trigger:hover { color: var(--accent-primary); }
-        .rename-container input { width: 100%; background: rgba(255,255,255,0.1); border: 1px solid var(--accent-primary); border-radius: 8px; padding: 6px 10px; color: white; font-size: 0.9rem; outline: none; }
-
-        /* Chat Area */
+        .session-title { font-weight: 700; font-size: 0.95rem; }
         .ai-chat-area { flex: 1; background: rgba(255,255,255,0.01); border: 1px solid var(--glass-border); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
-        .chat-header-minimal { padding: 20px 30px; border-bottom: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.01); }
-        .chat-header-minimal h2 { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.5px; }
-        .engine-tag { font-size: 0.65rem; font-weight: 900; color: var(--accent-primary); background: rgba(0,255,136,0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(0,255,136,0.2); }
-        
+        .chat-header-minimal { padding: 20px 30px; border-bottom: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: space-between; }
         .chat-body { flex: 1; overflow-y: auto; padding: 30px; display: flex; flex-direction: column; gap: 20px; }
-        .chat-welcome { text-align: center; margin-top: 100px; opacity: 0.8; }
-        .chat-welcome h2 { margin: 20px 0 10px; }
-        .chat-welcome p { color: var(--text-muted); }
-
         .message-bubble { max-width: 80%; padding: 14px 18px; border-radius: 18px; font-size: 0.95rem; line-height: 1.6; }
-        .message-bubble.user { align-self: flex-end; background: var(--accent-primary); color: #000; border-bottom-right-radius: 4px; font-weight: 600; box-shadow: 0 4px 15px rgba(0,255,136,0.2); }
+        .message-bubble.user { align-self: flex-end; background: var(--accent-primary); color: #000; border-bottom-right-radius: 4px; font-weight: 600; }
         .message-bubble.ai { align-self: flex-start; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
-        .message-bubble.ai .bubble-content { color: rgba(255,255,255,0.9); }
-        
-        .typing { font-style: italic; opacity: 0.6; }
-
-        .chat-footer { padding: 20px 30px; border-top: 1px solid var(--glass-border); background: rgba(0,0,0,0.2); }
-        .input-wrapper { display: flex; gap: 12px; background: rgba(255,255,255,0.05); padding: 6px; border-radius: 16px; border: 1px solid var(--glass-border); transition: 0.2s; }
-        .input-wrapper:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 15px rgba(0,255,136,0.1); }
-        .input-wrapper input { flex: 1; background: none; border: none; padding: 10px 15px; color: white; outline: none; font-size: 0.95rem; }
-        .input-wrapper button { background: var(--accent-primary); color: #000; border: none; width: 44px; height: 44px; border-radius: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
-        .input-wrapper button:hover:not(:disabled) { transform: scale(1.05); }
-        .input-wrapper button:disabled { opacity: 0.3; cursor: not-allowed; }
-        
-        .chat-empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.3; }
+        .chat-footer { padding: 20px 30px; border-top: 1px solid var(--glass-border); }
+        .input-wrapper { display: flex; gap: 12px; background: rgba(255,255,255,0.05); padding: 6px; border-radius: 16px; border: 1px solid var(--glass-border); }
+        .input-wrapper input { flex: 1; background: none; border: none; padding: 10px 15px; color: white; outline: none; }
+        .input-wrapper button { background: var(--accent-primary); color: #000; border: none; width: 44px; height: 44px; border-radius: 12px; cursor: pointer; }
       `}} />
     </div>
   );
