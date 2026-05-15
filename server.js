@@ -17,39 +17,25 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 
-// Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-// --- Helpers ---
 const getChats = () => {
   const chatPath = path.join(__dirname, 'src', 'chats.json');
   if (!fs.existsSync(chatPath)) return { sessions: [] };
-  try {
-    return JSON.parse(fs.readFileSync(chatPath, 'utf8'));
-  } catch (e) {
-    return { sessions: [] };
-  }
+  try { return JSON.parse(fs.readFileSync(chatPath, 'utf8')); } catch (e) { return { sessions: [] }; }
 };
 
 const saveChats = (data) => {
   const chatPath = path.join(__dirname, 'src', 'chats.json');
   fs.writeFileSync(chatPath, JSON.stringify(data, null, 2));
-  
   if (process.env.GITHUB_TOKEN) {
     const repoUrl = `https://${process.env.GITHUB_TOKEN}@github.com/Githubds12/finance-dashboard.git`;
-    const cmd = `
-      git config user.email "bot@render.com" && \
-      git config user.name "Render Bot" && \
-      git add src/chats.json && \
-      git commit -m "Update chat session history/meta" && \
-      git push ${repoUrl} master
-    `;
+    const cmd = `git config user.email "bot@render.com" && git config user.name "Render Bot" && git add src/chats.json && git commit -m "Update chats" && git push ${repoUrl} master`;
     exec(cmd);
   }
 };
 
-// --- API Endpoints (Must be BEFORE static middleware) ---
-
+// --- API ---
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
@@ -89,65 +75,35 @@ app.post('/api/chat/:sessionId', async (req, res) => {
   const { sessionId } = req.params;
   const chats = getChats();
   const session = chats.sessions.find(s => s.id === sessionId);
-  
   if (!session) return res.status(404).json({ error: 'Session not found' });
-
   const dataPath = path.join(__dirname, 'src', 'data.json');
-  if (!fs.existsSync(dataPath)) return res.status(500).json({ error: 'Source data missing' });
-  
   try {
     const financialData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const financialContext = `You are a Professional Financial Analyst. User: ${financialData.metadata.name}. Format all currency in ₹.`;
-
     const chat = model.startChat({
       history: [
-        { role: "user", parts: [{ text: financialContext }] },
-        { role: "model", parts: [{ text: "Analyst active." }] },
-        ...session.history.map(h => ({
-          role: h.role === 'user' ? 'user' : 'model',
-          parts: [{ text: h.text }]
-        }))
+        { role: "user", parts: [{ text: `Analyst context: ${financialData.metadata.name}. Use ₹.` }] },
+        { role: "model", parts: [{ text: "Understood." }] },
+        ...session.history.map(h => ({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: h.text }] }))
       ],
     });
-
     const result = await chat.sendMessage(message);
-    const response = await result.response;
-    const aiText = response.text();
-
-    session.history.push({ role: 'user', text: message });
-    session.history.push({ role: 'ai', text: aiText });
+    const aiText = (await result.response).text();
+    session.history.push({ role: 'user', text: message }, { role: 'ai', text: aiText });
     saveChats(chats);
-
     res.json({ text: aiText });
-  } catch (err) {
-    res.status(500).json({ error: 'AI error' });
-  }
+  } catch (err) { res.status(500).json({ error: 'AI Error' }); }
 });
 
-app.post('/api/sync', (req, res) => {
-  const overrides = req.body;
-  const dataPath = path.join(__dirname, 'src', 'data.json');
-  try {
-    const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
-    data.transactions = data.transactions.map(t => {
-      if (overrides[t.id]) {
-        t.nickname = overrides[t.id].nickname || '';
-        t.notes = overrides[t.id].notes || '';
-      }
-      return t;
-    });
-    fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// --- Static Middleware (Last) ---
-
+// --- STATIC & FALLBACK ---
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// SPA Catch-all
 app.use((req, res) => {
+  // If request starts with /api but didn't match any route above, return 404
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'API route not found' });
+  }
+  // Otherwise, serve SPA
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
